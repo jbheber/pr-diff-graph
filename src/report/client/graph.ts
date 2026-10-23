@@ -41,12 +41,24 @@ export interface GraphView {
   onOpen(cb: (path: string) => void): void;
 }
 
-function elements(graph: GraphJson): ElementDefinition[] {
+function elements(graph: GraphJson, chains: Map<string, string[]>): ElementDefinition[] {
   const out: ElementDefinition[] = [];
+  const changedIn = new Map<string, number>();
+  for (const n of graph.nodes) {
+    if (!n.changed) continue;
+    for (const id of chains.get(n.cluster) ?? []) changedIn.set(id, (changedIn.get(id) ?? 0) + 1);
+  }
   for (const c of graph.clusters) {
+    const count = changedIn.get(c.id) ?? 0;
     out.push({
       group: 'nodes',
-      data: { id: c.id, label: c.label, ...(c.parent ? { parent: c.parent } : {}) },
+      data: {
+        id: c.id,
+        label: c.label,
+        // Shown while the cluster is collapsed.
+        countLabel: `${c.label} (${count} ${count === 1 ? 'file' : 'files'})`,
+        ...(c.parent ? { parent: c.parent } : {}),
+      },
       classes: 'cluster',
     });
   }
@@ -90,9 +102,10 @@ export function createGraphView(
   graph: GraphJson,
   opts: { headless: boolean; collapsed: boolean },
 ): GraphView {
+  const chains = clusterChains(graph);
   const cy = cytoscape({
     ...(opts.headless ? { headless: true, styleEnabled: true } : { container }),
-    elements: elements(graph),
+    elements: elements(graph, chains),
     style: stylesheet(readPalette()),
     minZoom: 0.05,
     maxZoom: 4,
@@ -107,14 +120,18 @@ export function createGraphView(
     idealEdgeLength: () => 70,
     packComponents: true,
   } as LayoutOptions;
+  /** Fits the viewport to what is shown (an unfitted view opens blank). */
+  const fitVisible = () => {
+    const shown = cy.elements(':visible');
+    cy.fit(shown.nonempty() ? shown : undefined, 30);
+  };
+  cy.one('layoutstop', fitVisible);
   cy.layout(layout).run();
-  cy.fit(undefined, 30);
 
   // Layout runs once; collapsing, expanding and filtering move nothing.
   const positions = new Map<string, Position>(cy.nodes().map((n) => [n.id(), { ...n.position() }]));
   // Collapsed clusters take their children out of the graph; keep a handle on every element.
   const byId = new Map<string, NodeSingular>(cy.nodes().map((n) => [n.id(), n]));
-  const chains = clusterChains(graph);
 
   if (opts.headless) {
     // The extension always draws its cue canvas into cy.container(), which headless lacks.
@@ -132,6 +149,14 @@ export function createGraphView(
     expandCollapseCueSize: 12,
   });
   if (opts.collapsed) ec.collapseAll();
+  fitVisible();
+  if (!opts.headless) {
+    // The container may get its final size only after first layout of the page.
+    requestAnimationFrame(() => {
+      cy.resize();
+      fitVisible();
+    });
+  }
 
   cy.on('dbltap', 'node.cluster', (e) => {
     const n = e.target as NodeSingular;
@@ -160,8 +185,14 @@ export function createGraphView(
 
   return {
     cy,
-    collapseAll: () => ec.collapseAll(),
-    expandAll: () => ec.expandAll(),
+    collapseAll() {
+      ec.collapseAll();
+      fitVisible();
+    },
+    expandAll() {
+      ec.expandAll();
+      fitVisible();
+    },
 
     reveal(path) {
       const node = nodeByPath.get(path);
@@ -185,6 +216,7 @@ export function createGraphView(
         if (on) for (const id of chains.get(n.cluster) ?? []) shown.add(id);
       });
       for (const el of clusterEls) el.toggleClass('hidden', !shown.has(el.id()));
+      fitVisible();
     },
 
     highlight(paths) {
@@ -204,7 +236,7 @@ export function createGraphView(
         const p = positions.get(id);
         if (p && el.inside() && !el.isParent()) el.position(p);
       }
-      cy.fit(undefined, 30);
+      fitVisible();
     },
 
     onOpen(cb) {

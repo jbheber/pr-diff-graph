@@ -1,6 +1,7 @@
 import type { StylesheetJson } from 'cytoscape';
 
 export interface Palette {
+  bg: string;
   fg: string;
   muted: string;
   added: string;
@@ -18,6 +19,7 @@ export interface Palette {
 
 /** Fallbacks (the light palette) for when the CSS custom properties can't be read. */
 const DEFAULTS: Palette = {
+  bg: '#ffffff',
   fg: '#1f2328',
   muted: '#656d76',
   added: '#009e73',
@@ -34,6 +36,7 @@ const DEFAULTS: Palette = {
 };
 
 const VARS: Record<keyof Palette, string> = {
+  bg: '--pdg-bg',
   fg: '--pdg-fg',
   muted: '--pdg-muted',
   added: '--pdg-added',
@@ -73,12 +76,18 @@ export function stylesheet(p: Palette): StylesheetJson {
       style: {
         width: 'data(size)',
         height: 'data(size)',
+        // The basename below the node, outlined in the page background so it reads over edges.
         label: 'data(label)',
-        'font-size': 10,
+        'font-size': 12,
         color: p.fg,
         'text-valign': 'bottom',
-        'text-margin-y': 3,
-        'min-zoomed-font-size': 7,
+        'text-margin-y': 4,
+        'text-max-width': '140px',
+        'text-wrap': 'ellipsis',
+        'text-outline-color': p.bg,
+        'text-outline-width': 2,
+        // 12px × zoom < 6px: labels drop out below zoom 0.5, keeping big graphs legible.
+        'min-zoomed-font-size': 6,
         'border-color': p.fg,
         'border-opacity': 0.8,
       },
@@ -113,8 +122,11 @@ export function stylesheet(p: Palette): StylesheetJson {
       style: {
         shape: 'round-rectangle',
         label: 'data(label)',
-        'font-size': 11,
+        'font-size': 13,
         color: p.muted,
+        'text-outline-color': p.bg,
+        'text-outline-width': 2,
+        'min-zoomed-font-size': 4,
         'text-valign': 'top',
         'text-halign': 'center',
         'background-color': p.cluster,
@@ -128,8 +140,11 @@ export function stylesheet(p: Palette): StylesheetJson {
     {
       selector: 'node.cy-expand-collapse-collapsed-node',
       style: {
+        label: 'data(countLabel)',
         width: 46,
         height: 30,
+        color: p.fg,
+        'text-margin-y': 4,
         'background-opacity': 0.25,
         'border-width': 2,
         'border-style': 'double',

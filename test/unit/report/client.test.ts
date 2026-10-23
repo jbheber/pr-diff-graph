@@ -3,10 +3,10 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Core, NodeSingular } from 'cytoscape';
+import cytoscape, { type Core, type NodeSingular } from 'cytoscape';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { DiffEntry, GraphJson } from '../../../src/graph/types.js';
+import type { DiffEntry, GraphJson, GraphNode } from '../../../src/graph/types.js';
 import { renderDiff } from '../../../src/report/client/diff.js';
 import { start, type ReportApi } from '../../../src/report/client/main.js';
 import { loadReportAssets, renderReport } from '../../../src/report/render.js';
@@ -255,47 +255,135 @@ describe('report client', () => {
 
   it('renders a hostile file name and patch as text', () => {
     const path = '</script><img src=x onerror=alert(1)>.ts';
+    const oldPath = '<svg onload=alert(3)>.ts';
     const patch = [
-      `diff --git a/x.ts b/x.ts`,
-      `--- a/x.ts`,
-      `+++ b/x.ts`,
+      `diff --git a/${oldPath} b/${path}`,
+      `--- a/${oldPath}`,
+      `+++ b/${path}`,
       `@@ -1 +1 @@`,
       `-const a = 1;`,
       `+const s = '</script><script>alert(1)</script><img src=x onerror=alert(2)>';`,
       '',
     ].join('\n');
-    const hostile: GraphJson = {
-      ...graph,
-      clusters: [{ id: 'c:.', label: '<b>root</b>', parent: null }],
-      nodes: [{ ...graph.nodes[0]!, id: path, path, cluster: 'c:.', diffRef: 0 }],
-      edges: [],
-      cycles: [],
-      ranking: [path],
-      unresolved: [{ from: path, specifier: '<img src=x>', line: 1, reason: 'not found' }],
-    };
-    const diffs: DiffEntry[] = [{ path, patch, truncated: false, binary: false }];
-    const template = fixtureHtml.replace(
-      /<script type="application\/json" id="(graph|diff)-data">[\s\S]*?<\/script>/g,
-      (_m, id: string) =>
-        `<script type="application/json" id="${id}-data">{{${id === 'graph' ? 'GRAPH' : 'DIFFS'}_JSON}}</script>`,
-    );
-    load(
-      renderReport(
-        hostile,
-        diffs,
-        { collapseThreshold: 150 },
-        { template, clientJs: '', clientCss: '' },
-      ),
+    loadGraph(
+      {
+        ...singleFile(path, '<b>root</b>'),
+        unresolved: [{ from: path, specifier: '<img src=x>', line: 1, reason: 'not found' }],
+      },
+      [{ path, patch, truncated: false, binary: false }],
+      { oldPath, status: 'renamed' },
     );
     const { openNode } = startReport();
     openNode(path);
 
     expect($('#panel-path').textContent).toBe(path);
+    expect($('#panel-old-path').textContent).toBe(`was ${oldPath}`);
     expect($('#panel-diff').textContent).toContain("'</script><script>alert(1)</script>");
-    expect(document.body.querySelectorAll('img, b')).toHaveLength(0);
+    // diff2html's own icons are `svg`s; none may carry a handler.
+    expect(document.body.querySelectorAll('img, b, [onload], [onerror]')).toHaveLength(0);
     expect(document.body.querySelectorAll('script:not([type])')).toHaveLength(0);
   });
+
+  it.each([
+    ['packages/web/src/Header.vue', '<template><h1>acme</h1></template>'],
+    ['services/py/pyproject.toml', 'name = "svc"'],
+  ])('renders the diff of %s (no registered highlighter)', (path, line) => {
+    const patch = [
+      `diff --git a/${path} b/${path}`,
+      'new file mode 100644',
+      '--- /dev/null',
+      `+++ b/${path}`,
+      '@@ -0,0 +1 @@',
+      `+${line}`,
+      '',
+    ].join('\n');
+    loadGraph(singleFile(path, 'root'), [{ path, patch, truncated: false, binary: false }]);
+    const { openNode } = startReport();
+    openNode(path);
+    expect($('#panel-diff .d2h-wrapper')).not.toBeNull();
+    expect($('#panel-diff .pdg-raw')).toBeNull();
+    expect($('#panel-diff').textContent).toContain(line);
+  });
+
+  it('falls back to the raw patch when the diff view fails, never showing a stale diff', () => {
+    load(fixtureHtml);
+    const failing = 'packages/web/src/App.tsx';
+    const { openNode } = startReport({
+      renderDiff: (target, patch) => {
+        if (patch.includes(failing)) throw new Error('boom');
+        renderDiff(target, patch);
+      },
+    });
+    openNode('packages/core/src/math.ts');
+    expect($('#panel-diff').textContent).toContain('export const sub');
+
+    openNode(failing);
+    const diffBox = $('#panel-diff');
+    expect(diffBox.textContent).not.toContain('export const sub');
+    expect(diffBox.textContent).toContain('Diff view failed (boom)');
+    expect($('#panel-diff .pdg-raw').textContent).toContain("import { a } from './cycle/a';");
+  });
+
+  it('fits the viewport once the initial layout stops', () => {
+    load(fixtureHtml);
+    const proto = Object.getPrototypeOf(cytoscape({ headless: true })) as Core;
+    const fit = vi.spyOn(proto, 'fit');
+    try {
+      const { cy } = startReport();
+      // First fit: on layoutstop, before the filters hide the unchanged neighbors, so every
+      // element is in it. Last fit: after the filters, on what is shown now.
+      expect(fit.mock.calls[0]![0]?.length).toBe(cy.elements().length);
+      expect(fit.mock.calls.at(-1)![0]?.length).toBe(cy.elements(':visible').length);
+      expect(cy.elements(':visible').length).toBeLessThan(cy.elements().length);
+      expect(cy.pan()).not.toEqual({ x: 0, y: 0 });
+    } finally {
+      fit.mockRestore();
+    }
+  });
+
+  it('labels file nodes with their basename and collapsed clusters with a file count', () => {
+    load(fixtureHtml, { collapseThreshold: 1 });
+    const { cy, openNode } = startReport();
+    const core = cy.getElementById('c:packages/core') as NodeSingular;
+    const changedInCore = graph.nodes.filter(
+      (n) => n.changed && n.path.startsWith('packages/core/'),
+    );
+    expect(core.style('label')).toBe(`packages/core (${changedInCore.length} files)`);
+    openNode('packages/core/src/fmt/format.ts');
+    expect(fileNode(cy, 'packages/core/src/fmt/format.ts').style('label')).toBe('format.ts');
+  });
 });
+
+/** A graph with one changed file at `path` in a root cluster labelled `label`. */
+function singleFile(path: string, label: string): GraphJson {
+  return {
+    ...graph,
+    clusters: [{ id: 'c:.', label, parent: null }],
+    nodes: [{ ...graph.nodes[0]!, id: path, path, cluster: 'c:.', diffRef: 0 }],
+    edges: [],
+    cycles: [],
+    ranking: [path],
+    unresolved: [],
+  };
+}
+
+/** Renders `g` and `diffs` into the fixture report's template and loads it. */
+function loadGraph(g: GraphJson, diffs: DiffEntry[], node: Partial<GraphNode> = {}) {
+  const withNode = { ...g, nodes: g.nodes.map((n) => ({ ...n, ...node })) };
+  const template = fixtureHtml.replace(
+    /<script type="application\/json" id="(graph|diff)-data">[\s\S]*?<\/script>/g,
+    (_m, id: string) =>
+      `<script type="application/json" id="${id}-data">{{${id === 'graph' ? 'GRAPH' : 'DIFFS'}_JSON}}</script>`,
+  );
+  load(
+    renderReport(
+      withNode,
+      diffs,
+      { collapseThreshold: 150 },
+      { template, clientJs: '', clientCss: '' },
+    ),
+  );
+}
 
 describe('bundled report', () => {
   it('runs from the inlined script with no errors and no network', async () => {

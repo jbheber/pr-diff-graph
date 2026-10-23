@@ -290,3 +290,15 @@ select,
 .hljs-name {
   color: var(--pdg-hl-title);
 }
+
+.pdg-raw {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  background: var(--pdg-bg-2);
+  font:
+    12px/1.4 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}

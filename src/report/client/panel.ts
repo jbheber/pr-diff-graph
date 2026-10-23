@@ -72,7 +72,19 @@ export function createPanel(opts: {
         box.append(el('p', { className: 'pdg-note' }, 'Patch truncated (max-patch-bytes).'));
       }
       const target = el('div');
-      opts.renderDiff(target, entry.patch);
+      try {
+        opts.renderDiff(target, entry.patch);
+      } catch (e) {
+        // Never lose the diff to a renderer failure: show the raw patch as text instead.
+        target.replaceChildren(
+          el(
+            'p',
+            { className: 'pdg-note' },
+            `Diff view failed (${(e as Error).message}); raw patch:`,
+          ),
+          el('pre', { className: 'pdg-raw' }, entry.patch),
+        );
+      }
       box.append(target);
     }
     rendered.set(node.diffRef, box);
@@ -87,7 +99,9 @@ export function createPanel(opts: {
       edgeList('panel-in', 'panel-in-count', incoming.get(node.id) ?? [], 'from');
       edgeList('panel-out', 'panel-out-count', outgoing.get(node.id) ?? [], 'to');
       root.hidden = false;
-      byId('panel-diff').replaceChildren(diffFor(node));
+      const slot = byId('panel-diff');
+      slot.replaceChildren(); // never leave the previous file's diff under this file's name
+      slot.replaceChildren(diffFor(node));
     },
     hide() {
       root.hidden = true;
