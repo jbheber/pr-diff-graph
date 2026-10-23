@@ -76,13 +76,13 @@ describe('parser registry', () => {
     expect(log.warnings.filter((w) => w.includes('regex'))).toHaveLength(1);
   });
 
-  it('resolve is not implemented yet', () => {
+  it('resolve is delegated to the language resolver', () => {
     const reg = createRegistry(rt, recordingLogger());
     const go = reg.forPath('a.go')!;
-    const repo = {} as RepoIndex;
-    expect(go.resolve({ specifier: './b', kind: 'static', line: 1 }, 'a.go', repo)).toEqual({
-      kind: 'unresolved',
-      reason: 'not implemented',
+    const repo = { goModules: [] } as unknown as RepoIndex;
+    expect(go.resolve({ specifier: 'fmt', kind: 'static', line: 1 }, 'a.go', repo)).toEqual({
+      kind: 'external',
+      name: 'fmt',
     });
   });
 });

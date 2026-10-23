@@ -1,5 +1,6 @@
 import { Query, type Language, type Node } from 'web-tree-sitter';
 import type { Logger } from '../log.js';
+import { resolvePythonImport } from './python-resolve.js';
 import { regexImports } from './regex-fallback.js';
 import { withTree, type TreeSitterRuntime } from './treesitter.js';
 import { ParseError, type LanguageParser, type RawImport } from './types.js';
@@ -64,8 +65,6 @@ export function pythonParser(rt: TreeSitterRuntime, log: Logger): LanguageParser
       }
       return extract(language, query, source, path);
     },
-    resolve() {
-      return { kind: 'unresolved', reason: 'not implemented' };
-    },
+    resolve: resolvePythonImport,
   };
 }

@@ -1,5 +1,6 @@
 import { Query, type Language } from 'web-tree-sitter';
 import type { Logger } from '../log.js';
+import { resolveGoImport } from './go-resolve.js';
 import { regexImports } from './regex-fallback.js';
 import { withTree, type TreeSitterRuntime } from './treesitter.js';
 import { ParseError, type LanguageParser, type RawImport } from './types.js';
@@ -42,8 +43,6 @@ export function goParser(rt: TreeSitterRuntime, log: Logger): LanguageParser {
       }
       return extract(language, query, source, path);
     },
-    resolve() {
-      return { kind: 'unresolved', reason: 'not implemented' };
-    },
+    resolve: resolveGoImport,
   };
 }
