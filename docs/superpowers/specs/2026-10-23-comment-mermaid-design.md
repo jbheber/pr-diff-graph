@@ -11,7 +11,7 @@ The sticky comment gives totals and five file names, but no picture. Reviewers w
 Two collapsible sections after the totals, each a `<details>` with a one-line `<summary>` and a Mermaid `flowchart LR`:
 
 1. **Overview — "How the changed directories depend on each other".** One box per directory cluster, labelled `<path> · <n> files`. One arrow per ordered cluster pair, labelled with the number of changed→changed imports going across. An arrow whose group contains a cycle edge is red.
-2. **Focus — "Most connected files and cycles".** The top 10 ranked files, plus every file in a cycle, up to 25 nodes, labelled with the file name, coloured by status (added, modified, deleted, renamed). Changed→changed edges among them, up to 60, with cycle edges red.
+2. **Focus — "Most connected files and cycles".** The top 10 ranked files, plus every file in a cycle, up to 25 nodes, labelled with the end of the path (at most 48 characters, `…` marking the cut), coloured by status (added, modified, deleted, renamed). Changed→changed edges among them, up to 60, with cycle edges red.
 
 A section is left out when it would say nothing: the overview needs at least 2 boxes and 1 arrow, the focus needs at least 1 edge.
 
@@ -26,7 +26,7 @@ Clusters nest (adaptive clusters from the main design). The overview picks a cut
 - If there are now more than 12 boxes, keep the 11 with the most changed files (ties by path) and fold the rest into one box of kind `other`, drawn with fixed text as `other directories · <n> files`, so the total is exactly 12.
 - Each changed file counts toward the box that contains it. Unchanged neighbors are not counted and not drawn.
 - Arrows to and from folded boxes go to the `other` box: counts are added, the cycle flag is OR-ed, and arrows that become self-loops are dropped.
-- Keep the 30 heaviest arrows (count, then ids) and drop self-loops.
+- Drop self-loops and keep 30 arrows: cycle arrows first, so a red arrow is never dropped, then by count, then by ids.
 
 ## Fork safety: data, never text
 

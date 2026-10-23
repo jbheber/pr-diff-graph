@@ -122620,7 +122620,9 @@ function overview(graph, changed) {
   }
   return {
     boxes,
-    arrows: [...arrows.values()].sort((a, b) => b.count - a.count || a.from - b.from || a.to - b.to).slice(0, MAX_ARROWS)
+    arrows: [...arrows.values()].sort(
+      (a, b) => Number(b.cycle) - Number(a.cycle) || b.count - a.count || a.from - b.from || a.to - b.to
+    ).slice(0, MAX_ARROWS)
   };
 }
 function focus(graph, changed) {

@@ -144,7 +144,11 @@ function overview(graph: GraphJson, changed: GraphNode[]): Pick<CommentGraphs, '
   return {
     boxes,
     arrows: [...arrows.values()]
-      .sort((a, b) => b.count - a.count || a.from - b.from || a.to - b.to)
+      // Cycle arrows first, so the cap never drops a red one.
+      .sort(
+        (a, b) =>
+          Number(b.cycle) - Number(a.cycle) || b.count - a.count || a.from - b.from || a.to - b.to,
+      )
       .slice(0, MAX_ARROWS),
   };
 }

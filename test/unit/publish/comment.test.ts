@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildCommentBody, MARKER, upsertStickyComment } from '../../../src/publish/comment.js';
 import type { GraphEdge, GraphJson, GraphNode } from '../../../src/graph/types.js';
 import type { PipelineResult } from '../../../src/pipeline.js';
-import { toCommentSummary, type CommentSummary } from '../../../src/publish/summary.js';
+import {
+  parseSummaryJson,
+  toCommentSummary,
+  type CommentSummary,
+} from '../../../src/publish/summary.js';
 import { fakeOctokit, httpError, type FakeComment } from '../../helpers/fakeoctokit.js';
 
 const summary: CommentSummary = {
@@ -135,6 +139,40 @@ describe('buildCommentBody: graphs', () => {
   it('draws no graphs on a skipped body', () => {
     const body = buildCommentBody({ ...summary, skipped: true, graphs }, links);
     expect(body).not.toContain('```mermaid');
+  });
+
+  it('keeps hostile summary.json labels and paths inert, end to end', () => {
+    const evil = [
+      '```\n```html',
+      '%%{init: {"theme":"dark"}}%%',
+      '<img src=x onerror=alert(1)>',
+      'a"]-->X["b',
+      'line\nbreak',
+    ];
+    const raw = JSON.stringify({
+      ...summary,
+      top: ['src/a.ts'],
+      graphs: {
+        boxes: [
+          ...evil.map((label) => ({ label, files: 1, kind: 'dir' })),
+          { label: evil[2], files: 1, kind: 'own' },
+        ],
+        arrows: evil.map((_, i) => ({ from: i, to: i + 1, count: 1, cycle: i === 0 })),
+        nodes: evil.map((path) => ({ path, status: 'added' })),
+        edges: evil.slice(1).map((_, i) => ({ from: i, to: i + 1, cycle: false })),
+      },
+    });
+    const body = buildCommentBody(parseSummaryJson(raw), links);
+    expect(body.split('\n').filter((l) => l.startsWith('```'))).toHaveLength(4);
+    expect(body).not.toContain('%%');
+    expect(body).not.toContain('<img');
+    expect(body).not.toContain('onerror=');
+    // every Mermaid label opens and closes on its own line
+    for (const line of body.split('\n')) {
+      expect(line.split('["').length).toBe(line.split('"]').length);
+    }
+    expect(body).toContain('b0["_______html · 1 file"]');
+    expect(body).toContain('f4["line_break"]');
   });
 
   it('keeps a 500-file PR comment under 20,000 characters', () => {

@@ -198,17 +198,21 @@ describe('buildCommentGraphs: overview boxes', () => {
     ]);
   });
 
-  it('keeps the 30 heaviest arrows', () => {
+  /** 12 top-level boxes, every ordered pair (i, j) carrying (i + j) % 7 + 1 imports. */
+  function heavy(cycle: [string, string][] = []) {
     const tops = Array.from({ length: 12 }, (_, i) => `t${i}`);
-    const edges: [string, string][] = [];
+    const edges: [string, string, boolean][] = [];
     tops.forEach((x, i) =>
       tops.forEach((y, j) => {
         if (i === j) return;
-        // the pair (i, j) carries (i + j) % 7 + 1 imports
-        for (let k = 0; k < ((i + j) % 7) + 1; k++) edges.push([`${x}/${k}.ts`, `${y}/0.ts`]);
+        for (let k = 0; k < ((i + j) % 7) + 1; k++) {
+          const from = `${x}/${k}.ts`;
+          const to = `${y}/0.ts`;
+          edges.push([from, to, cycle.some(([a, b]) => a === from && b === to)]);
+        }
       }),
     );
-    const g = buildCommentGraphs(
+    return buildCommentGraphs(
       graph({
         clusters: tops.map((t): [string, null] => [`c:${t}`, null]),
         nodes: tops.flatMap((t) =>
@@ -217,6 +221,20 @@ describe('buildCommentGraphs: overview boxes', () => {
         edges,
       }),
     )!;
+  }
+
+  it('never drops a cycle arrow, however light', () => {
+    // t0 → t7 carries a single import, far below the 30th heaviest arrow
+    const g = heavy([['t0/0.ts', 't7/0.ts']]);
+    const t0 = g.boxes.findIndex((b) => b.label === 't0');
+    const t7 = g.boxes.findIndex((b) => b.label === 't7');
+    expect(g.arrows).toHaveLength(30);
+    expect(g.arrows[0]).toEqual({ from: t0, to: t7, count: 1, cycle: true });
+    expect(g.arrows.slice(1).every((a) => !a.cycle && a.count >= 6)).toBe(true);
+  });
+
+  it('keeps the 30 heaviest arrows', () => {
+    const g = heavy();
     expect(g.boxes).toHaveLength(12);
     expect(g.arrows).toHaveLength(30);
     const counts = g.arrows.map((a) => a.count);
