@@ -22,7 +22,6 @@ export function createPanel(opts: {
     incoming.set(e.to, [...(incoming.get(e.to) ?? []), e]);
     outgoing.set(e.from, [...(outgoing.get(e.from) ?? []), e]);
   }
-  const clusterLabel = new Map(graph.clusters.map((c) => [c.id, c.label]));
   /** Rendered diffs by diffRef: each is rendered the first time its node is opened. */
   const rendered = new Map<number, HTMLElement>();
 
@@ -46,7 +45,8 @@ export function createPanel(opts: {
       ['Status', node.status],
       ['Lines', `+${node.additions} −${node.deletions}`],
       ['Language', node.language ?? '—'],
-      ['Cluster', clusterLabel.get(node.cluster) ?? node.cluster],
+      // Labels of nested clusters are relative to their parent; this names the full path.
+      ['Cluster', node.cluster.slice(2)],
     ];
     if (node.binary) rows.push(['Binary', 'yes']);
     if (node.parseError) rows.push(['Parse error', node.parseError]);

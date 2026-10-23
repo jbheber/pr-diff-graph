@@ -2,9 +2,9 @@ import cytoscape, {
   type Core,
   type EdgeSingular,
   type ElementDefinition,
+  type Layouts,
   type LayoutOptions,
   type NodeSingular,
-  type Position,
 } from 'cytoscape';
 import expandCollapse from 'cytoscape-expand-collapse';
 import fcose from 'cytoscape-fcose';
@@ -26,6 +26,10 @@ interface ExpandCollapse {
   isExpandable(node: NodeSingular): boolean;
   isCollapsible(node: NodeSingular): boolean;
 }
+
+/** Side of a collapsed cluster holding `files` changed files: bigger than a file node. */
+export const collapsedSize = (files: number): number =>
+  Math.min(90, Math.max(28, 20 + 6 * Math.sqrt(files)));
 
 /** Width of an edge standing for `count` file edges. */
 export const aggregateWidth = (count: number): number => Math.min(8, 1 + 1.5 * Math.log2(count));
@@ -79,7 +83,10 @@ export interface GraphView {
   expandAll(): void;
   /** Expands the collapsed clusters around `path`, then selects and centers it. */
   reveal(path: string): void;
-  /** Hides file nodes failing `visible`, and clusters left with no visible file. */
+  /**
+   * Hides file nodes failing `visible`, and clusters left with no visible file, then lays out
+   * what is shown (the first call: the opening layout).
+   */
   setVisible(visible: (node: GraphNode) => boolean): void;
   /** Marks these files (or the collapsed clusters holding them) and fits the view to them. */
   highlight(paths: ReadonlySet<string>): void;
@@ -104,6 +111,7 @@ function elements(graph: GraphJson, chains: Map<string, string[]>): ElementDefin
         label: c.label,
         // Shown while the cluster is collapsed.
         countLabel: `${c.label} (${count} ${count === 1 ? 'file' : 'files'})`,
+        collapsedSize: collapsedSize(count),
         ...(c.parent ? { parent: c.parent } : {}),
       },
       classes: 'cluster',
@@ -158,25 +166,55 @@ export function createGraphView(
     maxZoom: 4,
   });
 
-  const layout: LayoutOptions = {
-    name: 'fcose',
-    animate: false,
-    randomize: true,
-    quality: 'default',
-    nodeRepulsion: () => 6000,
-    idealEdgeLength: () => 70,
-    packComponents: true,
-  } as LayoutOptions;
+  /**
+   * The elements on screen. `:visible` reads a per-element cache that a class change marks
+   * dirty but does not clear until the style is next read, so read each style first (else a
+   * filter applied just before would be ignored).
+   */
+  const shownElements = () => {
+    cy.elements().forEach((e) => void e.style('display'));
+    return cy.elements(':visible');
+  };
   /** Fits the viewport to what is shown (an unfitted view opens blank). */
   const fitVisible = () => {
-    const shown = cy.elements(':visible');
+    const shown = shownElements();
     cy.fit(shown.nonempty() ? shown : undefined, 30);
   };
-  cy.one('layoutstop', fitVisible);
-  cy.layout(layout).run();
-
-  // Layout runs once; collapsing, expanding and filtering move nothing.
-  const positions = new Map<string, Position>(cy.nodes().map((n) => [n.id(), { ...n.position() }]));
+  const collapsedEnd = (e: EdgeSingular) =>
+    e.source().hasClass('cy-expand-collapse-collapsed-node') ||
+    e.target().hasClass('cy-expand-collapse-collapsed-node');
+  let running: Layouts | null = null;
+  /**
+   * Lays out what is shown, then fits it (or runs `done`). `initial`: from random positions,
+   * no animation (the first view and "Reset layout"). Otherwise from the current positions, so
+   * an expand or collapse keeps the picture recognisable, animated in the browser.
+   */
+  const runLayout = (initial: boolean, done: () => void = fitVisible) => {
+    running?.stop();
+    const layout = shownElements().layout({
+      name: 'fcose',
+      animate: !initial && !opts.headless,
+      animationDuration: 300,
+      randomize: initial,
+      fit: false,
+      quality: 'default',
+      nodeRepulsion: () => 6000,
+      // Collapsed clusters are bigger than files; give their edges a little more room.
+      idealEdgeLength: (e: EdgeSingular) => (collapsedEnd(e) ? 90 : 70),
+      nodeSeparation: 60,
+      // Pull the files of a cluster together: edges to other clusters otherwise stretch the
+      // cluster boxes (on the CFP frontend this doubled the fitted zoom of the opening view).
+      gravityCompound: 3,
+      gravityRangeCompound: 0.8,
+      packComponents: true,
+    } as LayoutOptions);
+    running = layout;
+    layout.one('layoutstop', () => {
+      if (running === layout) running = null;
+      done();
+    });
+    layout.run();
+  };
   // Collapsed clusters take their children out of the graph; keep a handle on every element.
   const byId = new Map<string, NodeSingular>(cy.nodes().map((n) => [n.id(), n]));
 
@@ -254,12 +292,21 @@ export function createGraphView(
       buildAggregates();
     }
   };
-  // The extension's own cue (the +/− on a cluster) expands and collapses outside `step`.
+  // The extension's own cue (the +/− on a cluster) expands and collapses outside `step`; one
+  // click may fire several events, so the layout after it runs once.
+  let cueLayout = false;
   cy.on('expandcollapse.beforecollapse expandcollapse.beforeexpand', () => {
     if (!batching) clearAggregates();
   });
   cy.on('expandcollapse.aftercollapse expandcollapse.afterexpand', () => {
-    if (!batching) buildAggregates();
+    if (batching) return;
+    buildAggregates();
+    if (cueLayout) return;
+    cueLayout = true;
+    setTimeout(() => {
+      cueLayout = false;
+      runLayout(false);
+    }, 0);
   });
 
   if (graph.nodes.filter((n) => n.changed).length > opts.collapseThreshold) {
@@ -268,7 +315,9 @@ export function createGraphView(
       for (const id of clustersToExpand(graph, opts.collapseThreshold)) ec.expand(byId.get(id)!);
     });
   }
-  fitVisible();
+  // No layout yet: the first `setVisible` (the filters' opening state, which hides the
+  // unchanged neighbors) lays out what is shown then, so hidden files leave no holes.
+  let laidOut = false;
   if (!opts.headless) {
     // The container may get its final size only after first layout of the page.
     requestAnimationFrame(() => {
@@ -283,6 +332,7 @@ export function createGraphView(
       if (ec.isExpandable(n)) ec.expand(n);
       else if (ec.isCollapsible(n)) ec.collapse(n);
     });
+    runLayout(false);
   });
 
   const media =
@@ -308,27 +358,35 @@ export function createGraphView(
     cy,
     collapseAll() {
       step(() => ec.collapseAll());
-      fitVisible();
+      runLayout(false);
     },
     expandAll() {
       step(() => ec.expandAll());
-      fitVisible();
+      runLayout(false);
     },
 
     reveal(path) {
       const node = nodeByPath.get(path);
       if (!node) return;
-      step(() => {
-        for (let holder = collapsedHolder(node); holder; holder = collapsedHolder(node)) {
-          ec.expand(holder);
-        }
-      });
-      const el = byId.get(fileId(path));
-      if (!el?.inside()) return;
+      const el = byId.get(fileId(path))!;
+      const center = () => {
+        if (!el.inside()) return;
+        if (opts.headless) cy.center(el);
+        else cy.animate({ center: { eles: el }, duration: 250 });
+      };
+      if (collapsedHolder(node)) {
+        step(() => {
+          for (let holder = collapsedHolder(node); holder; holder = collapsedHolder(node)) {
+            ec.expand(holder);
+          }
+        });
+        runLayout(false, center);
+      } else {
+        center();
+      }
+      if (!el.inside()) return;
       cy.elements(':selected').unselect();
       el.select();
-      if (opts.headless) cy.center(el);
-      else cy.animate({ center: { eles: el }, duration: 250 });
     },
 
     setVisible(visible) {
@@ -341,7 +399,8 @@ export function createGraphView(
       for (const el of clusterEls) el.toggleClass('hidden', !shown.has(el.id()));
       // Hidden files leave the aggregate counts.
       step(() => undefined);
-      fitVisible();
+      runLayout(!laidOut);
+      laidOut = true;
     },
 
     highlight(paths) {
@@ -357,11 +416,7 @@ export function createGraphView(
     },
 
     resetLayout() {
-      for (const [id, el] of byId) {
-        const p = positions.get(id);
-        if (p && el.inside() && !el.isParent()) el.position(p);
-      }
-      fitVisible();
+      runLayout(true);
     },
 
     onOpen(cb) {

@@ -141,8 +141,8 @@ export function stylesheet(p: Palette): StylesheetJson {
       selector: 'node.cy-expand-collapse-collapsed-node',
       style: {
         label: 'data(countLabel)',
-        width: 46,
-        height: 30,
+        width: 'data(collapsedSize)',
+        height: 'data(collapsedSize)',
         color: p.fg,
         'text-margin-y': 4,
         'background-opacity': 0.25,

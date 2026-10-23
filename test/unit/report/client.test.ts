@@ -228,6 +228,10 @@ describe('report client', () => {
     expect(texts('#panel-in')).toEqual(['packages/web/src/cycle/a.ts']);
     expect(texts('#panel-out')).toEqual(['packages/web/src/cycle/c.ts']);
     expect($('#panel-in-count').textContent).toBe('1');
+    // The cluster row names the full path, not the label relative to the parent cluster.
+    const meta = [...document.querySelectorAll('#panel-meta dt')];
+    const cluster = meta.find((dt) => dt.textContent === 'Cluster')!.nextElementSibling;
+    expect(cluster!.textContent).toBe('packages/web/src');
 
     $<HTMLButtonElement>('#panel-out .pdg-link').click();
     expect($('#panel-path').textContent).toBe('packages/web/src/cycle/c.ts');
@@ -334,10 +338,9 @@ describe('report client', () => {
     const fit = vi.spyOn(proto, 'fit');
     try {
       const { cy } = startReport();
-      // First fit: on layoutstop, before the filters hide the unchanged neighbors, so every
-      // element is in it. Last fit: after the filters, on what is shown now.
-      expect(fit.mock.calls[0]![0]?.length).toBe(cy.elements().length);
-      expect(fit.mock.calls.at(-1)![0]?.length).toBe(cy.elements(':visible').length);
+      // One layout and fit, on what the opening filters show (unchanged neighbors hidden).
+      expect(fit).toHaveBeenCalledTimes(1);
+      expect(fit.mock.calls[0]![0]?.length).toBe(cy.elements(':visible').length);
       expect(cy.elements(':visible').length).toBeLessThan(cy.elements().length);
       expect(cy.pan()).not.toEqual({ x: 0, y: 0 });
     } finally {
@@ -420,6 +423,69 @@ describe('collapsed clusters', () => {
 
     expect(() => shownEdges(cy)[0]!.emit('tap')).not.toThrow();
     expect($('#panel').hidden).toBe(true);
+  });
+
+  /** Five clusters of 40 files, each file importing its namesake in the next cluster. */
+  const ring = () => {
+    const keys = ['a', 'b', 'c', 'd', 'e'];
+    const g = clusteredGraph(Object.fromEntries(keys.map((k) => [`c:${k}`, 40])));
+    const edges = keys.flatMap((k, i) =>
+      Array.from({ length: 40 }, (_, j) => edge(`${k}/f${j}.ts`, `${keys[(i + 1) % 5]}/f${j}.ts`)),
+    );
+    return { ...g, edges };
+  };
+  const boxOfShown = (cy: Core) =>
+    cy
+      .elements()
+      .filter((e) => e.visible())
+      .boundingBox({});
+
+  it('lays out what is shown after collapse all, compactly', () => {
+    loadGraph(ring(), [], {}, { collapseThreshold: 1000 });
+    const { cy } = startReport();
+    const before = { ...cy.getElementById('c:a').position() };
+    let proto = Object.getPrototypeOf(cy.collection()) as object;
+    while (!Object.hasOwn(proto, 'layout')) proto = Object.getPrototypeOf(proto) as object;
+    const layout = vi.spyOn(proto as EdgeCollection, 'layout');
+    try {
+      $<HTMLButtonElement>('#collapse-all').click();
+      expect(layout).toHaveBeenCalled();
+      const laidOut = layout.mock.contexts.at(-1) as EdgeCollection;
+      expect(
+        laidOut
+          .nodes()
+          .map((n) => n.id())
+          .sort(),
+      ).toEqual(['c:a', 'c:b', 'c:c', 'c:d', 'c:e']);
+    } finally {
+      layout.mockRestore();
+    }
+    expect(cy.getElementById('c:a').position()).not.toEqual(before);
+    // Fit into a ~1200×800 pane keeps zoom ≥ 0.5, so labels and counts stay readable.
+    const box = boxOfShown(cy);
+    expect(Math.max(box.w, box.h)).toBeLessThan(700);
+  });
+
+  it('lays out the view the big graph opens with', () => {
+    loadGraph(ring(), [], {}, { collapseThreshold: 1 });
+    const { cy } = startReport();
+    expect(cy.nodes('.file')).toHaveLength(0);
+    const box = boxOfShown(cy);
+    expect(Math.max(box.w, box.h)).toBeLessThan(700);
+  });
+
+  it('sizes collapsed clusters by their file count', () => {
+    loadGraph(
+      clusteredGraph({ 'c:a': 1, 'c:b': 40, 'c:c': 400 }),
+      [],
+      {},
+      { collapseThreshold: 1 },
+    );
+    const { cy } = startReport();
+    const width = (id: string) => parseFloat(cy.getElementById(id).style('width'));
+    expect(width('c:a')).toBe(28);
+    expect(width('c:b')).toBeCloseTo(20 + 6 * Math.sqrt(40));
+    expect(width('c:c')).toBe(90);
   });
 
   it('opens big graphs with the smallest clusters expanded while at most collapseThreshold show', () => {
