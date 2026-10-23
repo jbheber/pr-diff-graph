@@ -18,7 +18,8 @@ export const DEFAULT_EXCLUDE: string[] = [
 
 /**
  * Keeps the files that match `include` (empty = all) and none of the exclude globs.
- * A renamed file matches on either its new or its old path. A non-empty user `exclude`
+ * Include matches a renamed file on either its new or old path; exclude tests only the
+ * current path (for a deletion that is already the old path). A non-empty user `exclude`
  * replaces the default list instead of extending it.
  */
 export function filterFiles(
@@ -31,5 +32,5 @@ export function filterFiles(
   const isExcluded = picomatch(excludeGlobs, { dot: true });
   const matches = (test: (p: string) => boolean, f: ChangedFile) =>
     test(f.path) || (f.oldPath !== null && test(f.oldPath));
-  return files.filter((f) => matches(isIncluded, f) && !matches(isExcluded, f));
+  return files.filter((f) => matches(isIncluded, f) && !isExcluded(f.path));
 }

@@ -49,7 +49,15 @@ export async function buildRepoIndex(
 ): Promise<RepoIndex> {
   const listing = await git(repo, ['ls-tree', '-r', '--name-only', '-z', sha]);
   const files = new Set(
-    listing.split('\0').filter((p) => p && p !== 'node_modules' && !p.includes('node_modules/')),
+    listing
+      .split('\0')
+      .filter(
+        (p) =>
+          p &&
+          p !== 'node_modules' &&
+          !p.startsWith('node_modules/') &&
+          !p.includes('/node_modules/'),
+      ),
   );
 
   const children = new Map<string, string[]>();

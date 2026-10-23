@@ -44,6 +44,11 @@ describe('filterFiles', () => {
     expect(paths(filterFiles(files, ['src/**'], []))).toEqual(['lib/a.ts']);
   });
 
+  it('rename out of an excluded dir stays with default excludes', () => {
+    const files = [file('src/a.js', 'dist/a.js'), file('dist/b.js', 'src/b.js')];
+    expect(paths(filterFiles(files, [], []))).toEqual(['src/a.js']);
+  });
+
   it('user exclude replaces default', () => {
     const files = [file('package-lock.json'), file('src/a.ts'), file('src/gen.ts')];
     expect(paths(filterFiles(files, [], ['src/gen.ts']))).toEqual([

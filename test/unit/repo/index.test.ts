@@ -9,8 +9,14 @@ describe('buildRepoIndex', () => {
       'src/sub/c.ts': 'x',
       'node_modules/pkg/index.js': 'x',
       'src/node_modules/pkg/index.js': 'x',
+      'my_node_modules/x.js': 'x',
     });
-    expect([...idx.files].sort()).toEqual(['a.ts', 'src/b.ts', 'src/sub/c.ts']);
+    expect([...idx.files].sort()).toEqual([
+      'a.ts',
+      'my_node_modules/x.js',
+      'src/b.ts',
+      'src/sub/c.ts',
+    ]);
     expect(idx.has('src/b.ts')).toBe(true);
     expect(idx.has('node_modules/pkg/index.js')).toBe(false);
     expect(idx.listDir('')).toEqual(['a.ts']);
