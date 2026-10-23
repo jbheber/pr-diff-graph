@@ -171,8 +171,9 @@ describe('parseSummaryJson', () => {
 describe('parseSummaryJson: graphs', () => {
   const graphs = {
     boxes: [
-      { label: 'src/a', files: 2 },
-      { label: 'src/b', files: 1 },
+      { label: 'src/a', files: 2, kind: 'own' },
+      { label: 'src/b', files: 1, kind: 'dir' },
+      { label: '', files: 4, kind: 'other' },
     ],
     arrows: [{ from: 0, to: 1, count: 3, cycle: true }],
     nodes: [
@@ -190,7 +191,7 @@ describe('parseSummaryJson: graphs', () => {
 
   it('rejects out-of-range indexes', () => {
     const arrow = (a: object) => withGraphs({ ...graphs, arrows: [{ ...graphs.arrows[0], ...a }] });
-    expect(() => parseSummaryJson(arrow({ to: 2 }))).toThrow(/graphs\.arrows\.0\.to/);
+    expect(() => parseSummaryJson(arrow({ to: 3 }))).toThrow(/graphs\.arrows\.0\.to/);
     expect(() => parseSummaryJson(arrow({ from: -1 }))).toThrow();
     expect(() => parseSummaryJson(arrow({ from: 0.5 }))).toThrow();
     const edge = withGraphs({ ...graphs, edges: [{ from: 0, to: 2, cycle: false }] });
@@ -198,7 +199,7 @@ describe('parseSummaryJson: graphs', () => {
   });
 
   it('rejects too many items', () => {
-    const boxes = Array.from({ length: 13 }, (_, i) => ({ label: `d${i}`, files: 1 }));
+    const boxes = Array.from({ length: 13 }, (_, i) => ({ label: `d${i}`, files: 1, kind: 'dir' }));
     expect(() => parseSummaryJson(withGraphs({ ...graphs, boxes }))).toThrow();
     const nodes = Array.from({ length: 26 }, (_, i) => ({ path: `f${i}`, status: 'added' }));
     expect(() => parseSummaryJson(withGraphs({ ...graphs, nodes }))).toThrow();
@@ -216,6 +217,11 @@ describe('parseSummaryJson: graphs', () => {
     const box = (b: object) =>
       withGraphs({ ...graphs, boxes: [{ ...graphs.boxes[0], ...b }, graphs.boxes[1]] });
     expect(() => parseSummaryJson(box({ label: 'x'.repeat(301) }))).toThrow();
+    expect(() => parseSummaryJson(box({ kind: 'cluster' }))).toThrow();
+    expect(() => parseSummaryJson(box({ kind: undefined }))).toThrow();
+    expect(() => parseSummaryJson(box({ kind: 'other', label: 'src/a' }))).toThrow(
+      /graphs\.boxes\.0\.label/,
+    );
     expect(() => parseSummaryJson(box({ files: 10_000_001 }))).toThrow();
     expect(() => parseSummaryJson(box({ mermaid: 'graph TD' }))).toThrow();
     expect(() => parseSummaryJson(withGraphs({ ...graphs, mermaid: 'x' }))).toThrow();

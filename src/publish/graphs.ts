@@ -8,8 +8,12 @@ import type { GraphJson, GraphNode } from '../graph/types.js';
  * {@link mermaidLabel}.
  */
 export interface CommentGraphs {
-  /** Overview: directory clusters and how many changed files each holds. */
-  boxes: { label: string; files: number }[];
+  /**
+   * Overview: directory clusters and how many changed files each holds. `dir` is a cluster's
+   * whole subtree, `own` only the files directly in a cluster that was split, `other` the
+   * smallest boxes folded together (its label is empty; the renderer writes fixed text).
+   */
+  boxes: { label: string; files: number; kind: BoxKind }[];
   /** Overview: changed→changed imports between two boxes (indexes into `boxes`). */
   arrows: { from: number; to: number; count: number; cycle: boolean }[];
   /** Focus: the most connected files and the files in cycles. */
@@ -18,32 +22,38 @@ export interface CommentGraphs {
   edges: { from: number; to: number; cycle: boolean }[];
 }
 
+export const BOX_KINDS = ['dir', 'own', 'other'] as const;
+export type BoxKind = (typeof BOX_KINDS)[number];
+
 export const MAX_BOXES = 12;
+/** A box with more than this share of the changed files is split even past `MAX_BOXES`. */
+export const DOMINANT_SHARE = 0.25;
 export const MAX_ARROWS = 30;
 export const FOCUS_TOP = 10;
 export const MAX_NODES = 25;
 export const MAX_EDGES = 60;
 export const MAX_LABEL = 48;
 
-/** Appended to the label of a box holding the files directly in a cluster that was split. */
-export const OWN_FILES = ' (own files)';
-
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** A box of the overview: a cluster's whole subtree, or only its own files once it is split. */
-interface Box {
+/** A box while the tree is being cut: a cluster's whole subtree, or only its own files. */
+interface Cut {
   cluster: string;
   own: boolean;
   files: number;
 }
 
+/** The full directory of a cluster id (`c:<dir>`). */
+const dirOf = (clusterId: string) => clusterId.slice(2);
+
 /**
- * Cuts the cluster tree into at most {@link MAX_BOXES} boxes: start at the top-level clusters,
- * then keep splitting the box with the most changed files into its children (plus an
- * "own files" box) until the next split would go over the cap or nothing can be split.
- * Only changed files count; clusters holding none get no box.
+ * Cuts the cluster tree into boxes: start at the top-level clusters, then keep splitting the
+ * box with the most changed files (among those with child clusters) into its children, plus
+ * an "own files" box for its own files, while the split stays within {@link MAX_BOXES} or the
+ * box holds more than {@link DOMINANT_SHARE} of all changed files. Only changed files count;
+ * clusters holding none get no box. May return more than {@link MAX_BOXES}; `overview` folds.
  */
-function cutBoxes(graph: GraphJson, changed: GraphNode[]): Box[] {
+function cutBoxes(graph: GraphJson, changed: GraphNode[]): Cut[] {
   const parent = new Map(graph.clusters.map((c) => [c.id, c.parent]));
   const children = new Map<string, string[]>();
   for (const c of graph.clusters) {
@@ -57,7 +67,7 @@ function cutBoxes(graph: GraphJson, changed: GraphNode[]): Box[] {
       subtree.set(c, (subtree.get(c) ?? 0) + 1);
     }
   }
-  const whole = (id: string): Box => ({ cluster: id, own: false, files: subtree.get(id) ?? 0 });
+  const whole = (id: string): Cut => ({ cluster: id, own: false, files: subtree.get(id) ?? 0 });
   const busy = (ids: string[]) => ids.filter((id) => (subtree.get(id) ?? 0) > 0);
   const kids = (id: string) => busy(children.get(id) ?? []);
 
@@ -70,36 +80,55 @@ function cutBoxes(graph: GraphJson, changed: GraphNode[]): Box[] {
     const ownFiles = own.get(next.cluster) ?? 0;
     const parts = kids(next.cluster).map(whole);
     if (ownFiles > 0) parts.unshift({ cluster: next.cluster, own: true, files: ownFiles });
-    if (boxes.length - 1 + parts.length > MAX_BOXES) break;
+    const fits = boxes.length - 1 + parts.length <= MAX_BOXES;
+    if (!fits && next.files <= DOMINANT_SHARE * changed.length) break;
     boxes = boxes.flatMap((b) => (b === next ? parts : [b]));
   }
   return boxes;
 }
 
-/** The full directory of a cluster id (`c:<dir>`). */
-const dirOf = (clusterId: string) => clusterId.slice(2);
-
 function overview(graph: GraphJson, changed: GraphNode[]): Pick<CommentGraphs, 'boxes' | 'arrows'> {
-  const cut = cutBoxes(graph, changed).sort(
-    (a, b) => compare(dirOf(a.cluster), dirOf(b.cluster)) || Number(b.own) - Number(a.own),
-  );
+  const cut = cutBoxes(graph, changed);
   const parent = new Map(graph.clusters.map((c) => [c.id, c.parent]));
-  const whole = new Map<string, number>();
-  const own = new Map<string, number>();
-  cut.forEach((b, i) => (b.own ? own : whole).set(b.cluster, i));
-  const boxOf = (n: GraphNode): number | undefined => {
+  const whole = new Map<string, Cut>();
+  const own = new Map<string, Cut>();
+  for (const b of cut) (b.own ? own : whole).set(b.cluster, b);
+  const cutOf = (n: GraphNode): Cut | undefined => {
     if (own.has(n.cluster)) return own.get(n.cluster);
     for (let c: string | null | undefined = n.cluster; c; c = parent.get(c)) {
       if (whole.has(c)) return whole.get(c);
     }
     return undefined;
   };
-  const box = new Map<string, number>();
-  for (const n of changed) {
-    const i = boxOf(n);
-    if (i !== undefined) box.set(n.id, i);
+
+  // Over the cap: keep the largest boxes (ties by path) and fold the rest into "other".
+  const byPath = (a: Cut, b: Cut) =>
+    compare(dirOf(a.cluster), dirOf(b.cluster)) || Number(b.own) - Number(a.own);
+  let kept = cut;
+  let folded: Cut[] = [];
+  if (cut.length > MAX_BOXES) {
+    const bySize = [...cut].sort((a, b) => b.files - a.files || byPath(a, b));
+    kept = bySize.slice(0, MAX_BOXES - 1);
+    folded = bySize.slice(MAX_BOXES - 1);
+  }
+  kept = [...kept].sort(byPath);
+  const boxes: CommentGraphs['boxes'] = kept.map((b) => ({
+    label: dirOf(b.cluster),
+    files: b.files,
+    kind: b.own ? 'own' : 'dir',
+  }));
+  const indexOf = new Map<Cut, number>(kept.map((b, i) => [b, i]));
+  if (folded.length > 0) {
+    for (const b of folded) indexOf.set(b, boxes.length);
+    boxes.push({ label: '', files: folded.reduce((sum, b) => sum + b.files, 0), kind: 'other' });
   }
 
+  const box = new Map<string, number>();
+  for (const n of changed) {
+    const c = cutOf(n);
+    const i = c ? indexOf.get(c) : undefined;
+    if (i !== undefined) box.set(n.id, i);
+  }
   const arrows = new Map<string, CommentGraphs['arrows'][number]>();
   for (const e of graph.edges) {
     if (e.kind !== 'changed-changed') continue;
@@ -113,10 +142,7 @@ function overview(graph: GraphJson, changed: GraphNode[]): Pick<CommentGraphs, '
     arrows.set(key, a);
   }
   return {
-    boxes: cut.map((b) => ({
-      label: dirOf(b.cluster) + (b.own ? OWN_FILES : ''),
-      files: b.files,
-    })),
+    boxes,
     arrows: [...arrows.values()]
       .sort((a, b) => b.count - a.count || a.from - b.from || a.to - b.to)
       .slice(0, MAX_ARROWS),
@@ -205,10 +231,11 @@ const redLinks = (cycle: boolean[]) =>
 
 function overviewSection(g: CommentGraphs): string {
   const lines = g.boxes.map((b, i) => {
-    const own = b.label.endsWith(OWN_FILES);
-    const path = own ? b.label.slice(0, -OWN_FILES.length) : b.label;
     const files = `${fmt(b.files)} ${b.files === 1 ? 'file' : 'files'}`;
-    return `b${i}[${mermaidLabel(path, `${own ? OWN_FILES : ''} · ${files}`)}]`;
+    // Fixed text only: an "other" box has no repo label; "(own files)" is not from the data.
+    if (b.kind === 'other') return `b${i}["other directories · ${files}"]`;
+    const suffix = `${b.kind === 'own' ? ' (own files)' : ''} · ${files}`;
+    return `b${i}[${mermaidLabel(b.label, suffix)}]`;
   });
   for (const a of g.arrows) lines.push(`b${a.from} -->|${fmt(a.count)}| b${a.to}`);
   lines.push(...redLinks(g.arrows.map((a) => a.cycle)));

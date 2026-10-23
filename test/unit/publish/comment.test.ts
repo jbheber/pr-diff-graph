@@ -110,8 +110,8 @@ describe('buildCommentBody: plurals', () => {
 describe('buildCommentBody: graphs', () => {
   const graphs: CommentSummary['graphs'] = {
     boxes: [
-      { label: 'src/a', files: 2 },
-      { label: 'src/b', files: 1 },
+      { label: 'src/a', files: 2, kind: 'dir' },
+      { label: 'src/b', files: 1, kind: 'dir' },
     ],
     arrows: [{ from: 0, to: 1, count: 3, cycle: false }],
     nodes: [
@@ -198,7 +198,7 @@ describe('buildCommentBody: graphs', () => {
       summaryPath: null,
     };
     const s = toCommentSummary(result, 50, 'a'.repeat(40));
-    // splitting a package into its 10 directories would make 14 boxes
+    // no package holds more than 25% of the files, and splitting one would make 14 boxes
     expect(s.graphs!.boxes).toHaveLength(5);
     expect(s.graphs!.arrows.length).toBeGreaterThan(10);
     expect(s.graphs!.nodes).toHaveLength(25);
@@ -210,7 +210,11 @@ describe('buildCommentBody: graphs', () => {
   it('keeps a comment with every list at its cap and 300-character paths under 20,000', () => {
     const path = (i: number) => 'x'.repeat(290) + `/${i}.ts`;
     const full: CommentSummary['graphs'] = {
-      boxes: Array.from({ length: 12 }, (_, i) => ({ label: path(i), files: 9_999_999 })),
+      boxes: Array.from({ length: 12 }, (_, i) => ({
+        label: path(i),
+        files: 9_999_999,
+        kind: 'own' as const,
+      })),
       arrows: Array.from({ length: 30 }, (_, i) => ({
         from: i % 12,
         to: (i + 1) % 12,

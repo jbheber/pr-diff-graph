@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { PipelineResult } from '../pipeline.js';
 import {
+  BOX_KINDS,
   buildCommentGraphs,
   MAX_ARROWS,
   MAX_BOXES,
@@ -45,7 +46,11 @@ const index = z.number().int().min(0);
 const graphs = z
   .object({
     boxes: z
-      .array(z.object({ label: z.string().max(MAX_PATH), files: count }).strict())
+      .array(
+        z
+          .object({ label: z.string().max(MAX_PATH), files: count, kind: z.enum(BOX_KINDS) })
+          .strict(),
+      )
       .max(MAX_BOXES),
     arrows: z
       .array(z.object({ from: index, to: index, count, cycle: z.boolean() }).strict())
@@ -78,6 +83,11 @@ const graphs = z
           }
         }
       });
+    g.boxes.forEach((b, i) => {
+      if (b.kind === 'other' && b.label !== '') {
+        ctx.addIssue({ code: 'custom', path: ['boxes', i, 'label'], message: 'must be empty' });
+      }
+    });
     check('arrows', g.boxes.length);
     check('edges', g.nodes.length);
   });
@@ -131,7 +141,7 @@ export function toCommentSummary(
   };
   if (g) {
     summary.graphs = {
-      boxes: g.boxes.map((b) => ({ label: fitPath(b.label), files: clamp(b.files) })),
+      boxes: g.boxes.map((b) => ({ ...b, label: fitPath(b.label), files: clamp(b.files) })),
       arrows: g.arrows.map((a) => ({ ...a, count: clamp(a.count) })),
       nodes: g.nodes.map((n) => ({ path: fitPath(n.path), status: n.status })),
       edges: g.edges,

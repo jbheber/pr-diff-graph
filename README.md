@@ -42,7 +42,7 @@ On a PR with more than 50 changed files the action comments with the totals, cyc
 
 The comment (and the job summary) also carries two collapsible Mermaid graphs, which GitHub renders in place:
 
-- **Overview**: one box per changed directory (`<path> · <n> files`, at most 12, splitting the busiest directories while there is room) and one arrow per pair of directories, labelled with the number of imports between their changed files. Arrows that carry an import cycle are red.
+- **Overview**: one box per changed directory (`<path> · <n> files`, at most 12: the busiest directories are split while there is room, and always while one holds more than a quarter of the changed files; the smallest are then folded into `other directories`) and one arrow per pair of directories, labelled with the number of imports between their changed files. Arrows that carry an import cycle are red.
 - **Focus**: the 10 most connected changed files plus the files in cycles (at most 25), coloured by status (added, modified, deleted, renamed), with the imports among them. Cycle edges are red.
 
 A graph with nothing to show is left out. The interactive report remains the place for detail.

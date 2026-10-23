@@ -22,18 +22,21 @@ Also fix the plurals in the totals line ("1 cycle", "1 parse error", "1 import e
 Clusters nest (adaptive clusters from the main design). The overview picks a cut through that tree:
 
 - Start with the top-level clusters.
-- While there are fewer than `MAX_BOXES = 12` boxes, replace the box with the most changed files that has child clusters by its children. If it also has files of its own, keep a box for those, labelled `<path> (own files)`. Stop when the next replacement would go over 12 boxes or nothing can be split.
+- Take the box with the most changed files that has child clusters, and replace it by its children. If it also has files of its own, keep a box for those (kind `own`, drawn as `<path> (own files)`). Repeat while the replacement keeps the total within `MAX_BOXES = 12`, or while that box holds more than 25% of all changed files (`DOMINANT_SHARE`), even if that takes the total past 12. Stop otherwise, or when nothing can be split.
+- If there are now more than 12 boxes, keep the 11 with the most changed files (ties by path) and fold the rest into one box of kind `other`, drawn with fixed text as `other directories · <n> files`, so the total is exactly 12.
 - Each changed file counts toward the box that contains it. Unchanged neighbors are not counted and not drawn.
+- Arrows to and from folded boxes go to the `other` box: counts are added, the cycle flag is OR-ed, and arrows that become self-loops are dropped.
 - Keep the 30 heaviest arrows (count, then ids) and drop self-loops.
 
 ## Fork safety: data, never text
 
 In `mode: comment`, `summary.json` comes from a run on fork code, so the comment step never takes Mermaid text from it. Instead:
 
-- `CommentSummary` gains an optional `graphs` field holding structured data only: boxes `{ label, files }`, arrows `{ from, to, count, cycle }` that use array indexes, focus nodes `{ path, status }`, and focus edges `{ from, to, cycle }`.
+- `CommentSummary` gains an optional `graphs` field holding structured data only: boxes `{ label, files, kind }` (`kind` is `dir`, `own` or `other`; an `other` box has an empty label), arrows `{ from, to, count, cycle }` that use array indexes, focus nodes `{ path, status }`, and focus edges `{ from, to, cycle }`.
 - The strict zod schema checks:
   - `label` and `path` strings are at most 300 characters.
   - `status` is one of the four statuses.
+  - `kind` is one of `dir`, `own`, `other`, and an `other` box's label is empty.
   - Every list is capped: 12 boxes, 30 arrows, 25 nodes, 60 edges.
   - Every index is an integer that points inside its list.
   - Counts are non-negative integers up to 10,000,000.

@@ -54,6 +54,10 @@ function graph(spec: {
   } as unknown as GraphJson;
 }
 
+/** A box as the comment shows it, for readable assertions. */
+const name = (b: CommentGraphs['boxes'][number]) =>
+  b.kind === 'other' ? '(other)' : b.kind === 'own' ? `${b.label} (own files)` : b.label;
+
 describe('buildCommentGraphs: overview boxes', () => {
   // big: 2 own files, big/x1 (8 sub-clusters, 1 file each), big/x2..x5 (1 file each)
   const clusters: [string, string | null][] = [
@@ -77,22 +81,53 @@ describe('buildCommentGraphs: overview boxes', () => {
     { path: 'quiet/n.ts', cluster: 'c:quiet', changed: false },
   ];
 
-  it('splits the busiest box while it stays within 12, keeping an (own files) box', () => {
+  it('splits a dominant box past 12 and folds the smallest boxes into "other"', () => {
     const g = buildCommentGraphs(
       graph({ clusters, nodes, edges: [['small/s.ts', 'big/own1.ts']] }),
     )!;
-    const boxes = Object.fromEntries(g.boxes.map((b) => [b.label, b.files]));
-    // splitting big/x1 into 8 would make 14 boxes, so it stays whole
-    expect(boxes).toEqual({
-      'big (own files)': 2,
-      'big/x1': 8,
-      'big/x2': 1,
-      'big/x3': 1,
-      'big/x4': 1,
-      'big/x5': 1,
-      small: 1,
-    });
-    expect(g.boxes.length).toBeLessThanOrEqual(12);
+    // big/x1 holds 8 of 15 changed files (> 25%), so it splits into 8 even though that makes
+    // 14 boxes; the 3 smallest (1 file each, last by label) fold into one "other" box
+    expect(g.boxes.map((b) => [name(b), b.files])).toEqual([
+      ['big (own files)', 2],
+      ...Array.from({ length: 8 }, (_, i) => [`big/x1/y${i}`, 1]),
+      ['big/x2', 1],
+      ['big/x3', 1],
+      ['(other)', 3],
+    ]);
+    expect(g.boxes.find((b) => b.kind === 'other')?.label).toBe('');
+    expect(g.boxes.filter((b) => b.kind === 'own').map((b) => b.label)).toEqual(['big']);
+    // small/s.ts → big/own1.ts now runs from "other" to the own-files box
+    expect(g.arrows).toEqual([{ from: 11, to: 0, count: 1, cycle: false }]);
+  });
+
+  it('merges arrows into the "other" box: counts add up, cycles OR, self-loops go', () => {
+    const tops = Array.from({ length: 14 }, (_, i) => `t${String(i).padStart(2, '0')}`);
+    const g = buildCommentGraphs(
+      graph({
+        clusters: tops.map((t): [string, null] => [`c:${t}`, null]),
+        nodes: tops.flatMap((t, i) =>
+          Array.from({ length: i < 11 ? 2 : 1 }, (_, k) => ({
+            path: `${t}/${k}.ts`,
+            cluster: `c:${t}`,
+          })),
+        ),
+        edges: [
+          ['t11/0.ts', 't00/0.ts'],
+          ['t12/0.ts', 't00/1.ts', true],
+          ['t11/0.ts', 't12/0.ts', true],
+          ['t00/0.ts', 't13/0.ts'],
+          ['t01/0.ts', 't00/0.ts'],
+        ],
+      }),
+    )!;
+    expect(g.boxes).toHaveLength(12);
+    expect(g.boxes.map(name)).toEqual([...tops.slice(0, 11), '(other)']);
+    expect(g.boxes[11]!.files).toBe(3);
+    expect(g.arrows).toEqual([
+      { from: 11, to: 0, count: 2, cycle: true },
+      { from: 0, to: 11, count: 1, cycle: false },
+      { from: 1, to: 0, count: 1, cycle: false },
+    ]);
   });
 
   it('splits down further when there is room', () => {
@@ -105,7 +140,7 @@ describe('buildCommentGraphs: overview boxes', () => {
         edges: [['small/s.ts', 'big/own1.ts']],
       }),
     )!;
-    expect(g.boxes.map((b) => b.label).sort()).toEqual([
+    expect(g.boxes.map(name).sort()).toEqual([
       'big (own files)',
       'big/x1/y0',
       'big/x1/y1',
@@ -130,6 +165,7 @@ describe('buildCommentGraphs: overview boxes', () => {
       }),
     )!;
     expect(g.boxes.find((b) => b.label === 'big/x2')?.files).toBe(1);
+    expect(g.boxes.reduce((sum, b) => sum + b.files, 0)).toBe(15);
     expect(g.boxes.some((b) => b.label.startsWith('quiet'))).toBe(false);
     expect(g.arrows).toHaveLength(1);
   });
@@ -271,13 +307,15 @@ describe('mermaidLabel', () => {
 
 const sample: CommentGraphs = {
   boxes: [
-    { label: 'src/app', files: 3 },
-    { label: 'src/lib (own files)', files: 1 },
-    { label: 'src/`evil`', files: 2 },
+    { label: 'src/app', files: 3, kind: 'dir' },
+    { label: 'src/lib', files: 1, kind: 'own' },
+    { label: 'src/`evil`', files: 2, kind: 'dir' },
+    { label: '', files: 5, kind: 'other' },
   ],
   arrows: [
     { from: 0, to: 1, count: 4, cycle: false },
     { from: 1, to: 2, count: 1, cycle: true },
+    { from: 3, to: 0, count: 2, cycle: false },
   ],
   nodes: [
     { path: 'src/app/a.ts', status: 'added' },
@@ -302,6 +340,8 @@ describe('renderGraphSections', () => {
     expect(md).toContain('b0["src/app · 3 files"]');
     expect(md).toContain('b1["src/lib (own files) · 1 file"]');
     expect(md).toContain('b2["src/_evil_ · 2 files"]');
+    expect(md).toContain('b3["other directories · 5 files"]');
+    expect(md).toContain('b3 -->|2| b0');
     expect(md).toContain('b0 -->|4| b1');
     expect(md).toContain('b1 -->|1| b2');
     expect(md).toContain('linkStyle 1 stroke:#d1242f,stroke-width:2px');

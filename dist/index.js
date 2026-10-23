@@ -122528,14 +122528,16 @@ function date4(params) {
 }
 
 // src/publish/graphs.ts
+var BOX_KINDS = ["dir", "own", "other"];
 var MAX_BOXES = 12;
+var DOMINANT_SHARE = 0.25;
 var MAX_ARROWS = 30;
 var FOCUS_TOP = 10;
 var MAX_NODES = 25;
 var MAX_EDGES = 60;
 var MAX_LABEL = 48;
-var OWN_FILES = " (own files)";
 var compare4 = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+var dirOf2 = (clusterId) => clusterId.slice(2);
 function cutBoxes(graph, changed) {
   const parent2 = new Map(graph.clusters.map((c) => [c.id, c.parent]));
   const children = /* @__PURE__ */ new Map();
@@ -122560,30 +122562,48 @@ function cutBoxes(graph, changed) {
     const ownFiles = own2.get(next.cluster) ?? 0;
     const parts2 = kids(next.cluster).map(whole);
     if (ownFiles > 0) parts2.unshift({ cluster: next.cluster, own: true, files: ownFiles });
-    if (boxes.length - 1 + parts2.length > MAX_BOXES) break;
+    const fits = boxes.length - 1 + parts2.length <= MAX_BOXES;
+    if (!fits && next.files <= DOMINANT_SHARE * changed.length) break;
     boxes = boxes.flatMap((b) => b === next ? parts2 : [b]);
   }
   return boxes;
 }
-var dirOf2 = (clusterId) => clusterId.slice(2);
 function overview(graph, changed) {
-  const cut = cutBoxes(graph, changed).sort(
-    (a, b) => compare4(dirOf2(a.cluster), dirOf2(b.cluster)) || Number(b.own) - Number(a.own)
-  );
+  const cut = cutBoxes(graph, changed);
   const parent2 = new Map(graph.clusters.map((c) => [c.id, c.parent]));
   const whole = /* @__PURE__ */ new Map();
   const own2 = /* @__PURE__ */ new Map();
-  cut.forEach((b, i3) => (b.own ? own2 : whole).set(b.cluster, i3));
-  const boxOf = (n2) => {
+  for (const b of cut) (b.own ? own2 : whole).set(b.cluster, b);
+  const cutOf = (n2) => {
     if (own2.has(n2.cluster)) return own2.get(n2.cluster);
     for (let c = n2.cluster; c; c = parent2.get(c)) {
       if (whole.has(c)) return whole.get(c);
     }
     return void 0;
   };
+  const byPath = (a, b) => compare4(dirOf2(a.cluster), dirOf2(b.cluster)) || Number(b.own) - Number(a.own);
+  let kept = cut;
+  let folded = [];
+  if (cut.length > MAX_BOXES) {
+    const bySize = [...cut].sort((a, b) => b.files - a.files || byPath(a, b));
+    kept = bySize.slice(0, MAX_BOXES - 1);
+    folded = bySize.slice(MAX_BOXES - 1);
+  }
+  kept = [...kept].sort(byPath);
+  const boxes = kept.map((b) => ({
+    label: dirOf2(b.cluster),
+    files: b.files,
+    kind: b.own ? "own" : "dir"
+  }));
+  const indexOf = new Map(kept.map((b, i3) => [b, i3]));
+  if (folded.length > 0) {
+    for (const b of folded) indexOf.set(b, boxes.length);
+    boxes.push({ label: "", files: folded.reduce((sum, b) => sum + b.files, 0), kind: "other" });
+  }
   const box = /* @__PURE__ */ new Map();
   for (const n2 of changed) {
-    const i3 = boxOf(n2);
+    const c = cutOf(n2);
+    const i3 = c ? indexOf.get(c) : void 0;
     if (i3 !== void 0) box.set(n2.id, i3);
   }
   const arrows = /* @__PURE__ */ new Map();
@@ -122599,10 +122619,7 @@ function overview(graph, changed) {
     arrows.set(key, a);
   }
   return {
-    boxes: cut.map((b) => ({
-      label: dirOf2(b.cluster) + (b.own ? OWN_FILES : ""),
-      files: b.files
-    })),
+    boxes,
     arrows: [...arrows.values()].sort((a, b) => b.count - a.count || a.from - b.from || a.to - b.to).slice(0, MAX_ARROWS)
   };
 }
@@ -122665,10 +122682,10 @@ function section(summary2, lines) {
 var redLinks = (cycle) => cycle.flatMap((c, i3) => c ? [`linkStyle ${i3} ${RED}`] : []);
 function overviewSection(g) {
   const lines = g.boxes.map((b, i3) => {
-    const own2 = b.label.endsWith(OWN_FILES);
-    const path9 = own2 ? b.label.slice(0, -OWN_FILES.length) : b.label;
     const files = `${fmt(b.files)} ${b.files === 1 ? "file" : "files"}`;
-    return `b${i3}[${mermaidLabel(path9, `${own2 ? OWN_FILES : ""} \xB7 ${files}`)}]`;
+    if (b.kind === "other") return `b${i3}["other directories \xB7 ${files}"]`;
+    const suffix = `${b.kind === "own" ? " (own files)" : ""} \xB7 ${files}`;
+    return `b${i3}[${mermaidLabel(b.label, suffix)}]`;
   });
   for (const a of g.arrows) lines.push(`b${a.from} -->|${fmt(a.count)}| b${a.to}`);
   lines.push(...redLinks(g.arrows.map((a) => a.cycle)));
@@ -122699,7 +122716,9 @@ var MAX_PATH = 300;
 var count = external_exports.number().int().min(0).max(MAX_COUNT);
 var index = external_exports.number().int().min(0);
 var graphs = external_exports.object({
-  boxes: external_exports.array(external_exports.object({ label: external_exports.string().max(MAX_PATH), files: count }).strict()).max(MAX_BOXES),
+  boxes: external_exports.array(
+    external_exports.object({ label: external_exports.string().max(MAX_PATH), files: count, kind: external_exports.enum(BOX_KINDS) }).strict()
+  ).max(MAX_BOXES),
   arrows: external_exports.array(external_exports.object({ from: index, to: index, count, cycle: external_exports.boolean() }).strict()).max(MAX_ARROWS),
   nodes: external_exports.array(
     external_exports.object({
@@ -122718,6 +122737,11 @@ var graphs = external_exports.object({
           message: `index ${x2[end]} is out of range`
         });
       }
+    }
+  });
+  g.boxes.forEach((b, i3) => {
+    if (b.kind === "other" && b.label !== "") {
+      ctx.addIssue({ code: "custom", path: ["boxes", i3, "label"], message: "must be empty" });
     }
   });
   check2("arrows", g.boxes.length);
@@ -122761,7 +122785,7 @@ function toCommentSummary(result, minFiles, headSha) {
   };
   if (g) {
     summary2.graphs = {
-      boxes: g.boxes.map((b) => ({ label: fitPath(b.label), files: clamp(b.files) })),
+      boxes: g.boxes.map((b) => ({ ...b, label: fitPath(b.label), files: clamp(b.files) })),
       arrows: g.arrows.map((a) => ({ ...a, count: clamp(a.count) })),
       nodes: g.nodes.map((n2) => ({ path: fitPath(n2.path), status: n2.status })),
       edges: g.edges
