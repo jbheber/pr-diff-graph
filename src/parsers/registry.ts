@@ -1,5 +1,7 @@
 import type { Logger } from '../log.js';
 import { baseOf } from '../repo/paths.js';
+import { goParser } from './go.js';
+import { pythonParser } from './python.js';
 import type { TreeSitterRuntime } from './treesitter.js';
 import type { LanguageParser } from './types.js';
 import { typescriptParser } from './typescript.js';
@@ -11,7 +13,7 @@ export interface ParserRegistry {
 }
 
 export function createRegistry(rt: TreeSitterRuntime, log: Logger): ParserRegistry {
-  const parsers = [typescriptParser(rt, log)];
+  const parsers = [typescriptParser(rt, log), pythonParser(rt, log), goParser(rt, log)];
   const byExt = new Map<string, LanguageParser>();
   for (const p of parsers) for (const ext of p.extensions) byExt.set(ext, p);
 
