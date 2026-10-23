@@ -42,17 +42,21 @@ export interface CommentOctokit {
   };
 }
 
+/** The account `GITHUB_TOKEN` comments as. */
+export const ACTIONS_BOT = 'github-actions[bot]';
+
 /**
- * A repo path as a markdown code span. Backticks would end the span and angle brackets are
- * escaped as entities so nothing in a hostile path can become markup.
+ * A repo path as a markdown code span. Markdown inside a code span is inert, so only what could
+ * break out of it or the list line is changed: backticks become `ˋ`, control characters (CR, LF,
+ * tab...) a space, and bidi controls, which could make the path read as something else, are
+ * removed.
  */
 export function codePath(path: string): string {
   const safe = path
     .replaceAll('`', 'ˋ')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
     // eslint-disable-next-line no-control-regex -- control characters are what it replaces
-    .replace(/[\u0000-\u001f\u007f]/g, '�');
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[\u202a-\u202e\u2066-\u2069]/g, '');
   return `\`${safe}\``;
 }
 
@@ -97,15 +101,16 @@ const PAGE = 100;
 
 /**
  * Who wrote our comment: the token's own user when `GET /user` works (a PAT or app user token);
- * with `GITHUB_TOKEN` it answers 403, and then any bot account is accepted. A human's comment
- * quoting the marker is never matched.
+ * with `GITHUB_TOKEN` it answers 403, and then only `github-actions[bot]` is accepted. Any other
+ * error is rethrown. A human's comment quoting the marker is never matched.
  */
 async function isOurs(octokit: CommentOctokit): Promise<(c: IssueComment) => boolean> {
   try {
     const { data } = await octokit.rest.users.getAuthenticated();
     return (c) => c.user?.login === data.login;
-  } catch {
-    return (c) => c.user?.type === 'Bot';
+  } catch (e) {
+    if ((e as { status?: unknown } | null)?.status !== 403) throw e;
+    return (c) => c.user?.login === ACTIONS_BOT;
   }
 }
 

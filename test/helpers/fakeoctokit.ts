@@ -6,14 +6,24 @@ export interface FakeComment {
   user: { login: string; type: string } | null;
 }
 
+export interface FakePullRequest {
+  number: number;
+  state: string;
+  head: { sha: string; ref: string; repo: { full_name: string } | null };
+  base: { repo: { full_name: string } };
+}
+
 export interface FakeOptions {
   /** Comments on the PR, served 100 per page. */
   comments?: FakeComment[];
-  /** Login returned by GET /user; null makes it fail with 403 like GITHUB_TOKEN. */
+  /** Login returned by GET /user; null (the default) makes it fail with 403 like GITHUB_TOKEN. */
   login?: string | null;
+  /** Error GET /user fails with instead. */
+  userError?: Error;
   /** Error thrown by createComment/updateComment. */
   writeError?: Error;
-  pullRequests?: { number: number; state: string; head: { sha: string } }[];
+  /** Pull requests: returned by the commit lookup, and by `pulls.get` by number. */
+  pullRequests?: FakePullRequest[];
   /** Artifacts of the workflow run, and the zip every download returns. */
   artifacts?: { id: number; name: string; expired: boolean; size_in_bytes: number }[];
   zip?: Uint8Array;
@@ -34,6 +44,7 @@ export function fakeOctokit(o: FakeOptions = {}) {
     rest: {
       users: {
         getAuthenticated: vi.fn(async () => {
+          if (o.userError) throw o.userError;
           if (o.login === null || o.login === undefined) {
             throw httpError(403, 'Resource not accessible by integration');
           }
@@ -63,6 +74,13 @@ export function fakeOctokit(o: FakeOptions = {}) {
         listPullRequestsAssociatedWithCommit: vi.fn(async () => ({
           data: o.pullRequests ?? [],
         })),
+      },
+      pulls: {
+        get: vi.fn(async (p: { pull_number: number }) => {
+          const pr = (o.pullRequests ?? []).find((x) => x.number === p.pull_number);
+          if (!pr) throw httpError(404, 'Not Found');
+          return { data: pr };
+        }),
       },
     },
   };

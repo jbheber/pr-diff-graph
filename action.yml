@@ -51,7 +51,9 @@ inputs:
     required: false
     default: ''
   artifact-name:
-    description: Name of the uploaded artifact
+    description: >-
+      Name of the report artifact; mode report also uploads summary.json alone as
+      <name>-summary, which mode comment downloads
     required: false
     default: pr-diff-graph
   artifact-retention-days:

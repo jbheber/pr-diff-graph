@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCommentBody, MARKER, upsertStickyComment } from '../../../src/publish/comment.js';
 import type { CommentSummary } from '../../../src/publish/summary.js';
-import { fakeOctokit, type FakeComment } from '../../helpers/fakeoctokit.js';
+import { fakeOctokit, httpError, type FakeComment } from '../../helpers/fakeoctokit.js';
 
 const summary: CommentSummary = {
   version: 1,
@@ -32,17 +32,24 @@ describe('buildCommentBody', () => {
     expect(body).toContain(links.runUrl);
   });
 
-  it('escapes backticks and angle brackets in paths', () => {
+  it('replaces backticks and keeps markup literal inside the code span', () => {
     const body = buildCommentBody(summary, links);
     expect(body).toContain('`src/a.ts`');
-    expect(body).toContain('`src/ˋxˋ&lt;img src=y&gt;.ts`');
-    expect(body).not.toContain('<img');
+    expect(body).toContain('`src/ˋxˋ<img src=y>.ts`');
+    expect(body).not.toContain('&lt;');
   });
 
-  it('keeps a path with a newline on its list line', () => {
-    const body = buildCommentBody({ ...summary, top: ['a\n# heading.ts'] }, links);
+  it('keeps a path with CR/LF on its list line', () => {
+    const body = buildCommentBody({ ...summary, top: ['a\r\n# heading.ts'] }, links);
     expect(body).not.toContain('\n# heading');
-    expect(body).toContain('# heading.ts`');
+    expect(body).toContain('`a  # heading.ts`');
+  });
+
+  it('removes bidi controls', () => {
+    const rlo = String.fromCharCode(0x202e);
+    const isolate = String.fromCharCode(0x2066);
+    const body = buildCommentBody({ ...summary, top: [`a${rlo}b${isolate}c.ts`] }, links);
+    expect(body).toContain('`abc.ts`');
   });
 
   it('links the run when there is no artifact', () => {
@@ -109,6 +116,30 @@ describe('upsertStickyComment', () => {
     expect(octokit.rest.issues.updateComment).toHaveBeenCalledWith(
       expect.objectContaining({ comment_id: 4 }),
     );
+  });
+
+  it('with GITHUB_TOKEN (GET /user 403) matches only github-actions[bot], not any bot', async () => {
+    const comments = [
+      { id: 3, body: MARKER, user: { login: 'other-app[bot]', type: 'Bot' } },
+      { id: 4, body: MARKER, user: bot },
+    ];
+    const octokit = fakeOctokit({ comments });
+    expect(await upsertStickyComment(octokit, p)).toBe('updated');
+    expect(octokit.rest.issues.updateComment).toHaveBeenCalledWith(
+      expect.objectContaining({ comment_id: 4 }),
+    );
+
+    const onlyOther = fakeOctokit({ comments: [comments[0]!] });
+    expect(await upsertStickyComment(onlyOther, p)).toBe('created');
+  });
+
+  it('rethrows a GET /user failure other than 403', async () => {
+    const octokit = fakeOctokit({
+      comments: [{ id: 4, body: MARKER, user: bot }],
+      userError: httpError(500, 'server error'),
+    });
+    await expect(upsertStickyComment(octokit, p)).rejects.toThrow('server error');
+    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
   });
 
   it('updateOnly: does not create', async () => {

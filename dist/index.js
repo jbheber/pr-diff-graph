@@ -165852,7 +165852,10 @@ function unzipSync(data, opts) {
 
 // src/publish/artifact.ts
 var MAX_SUMMARY_BYTES = 64 * 1024;
-var MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
+var MAX_SUMMARY_ZIP_BYTES = 1024 * 1024;
+function summaryArtifactName(name2) {
+  return `${name2}-summary`;
+}
 async function uploadReport(files, rootDir, name2, retentionDays) {
   const { id } = await new DefaultArtifactClient().uploadArtifact(name2, files, rootDir, {
     retentionDays
@@ -165868,18 +165871,14 @@ async function downloadSummary(octokit, p) {
     owner: p.owner,
     repo: p.repo,
     run_id: p.runId,
-    name: p.artifactName,
     per_page: 100
   });
-  const artifact = data.artifacts.find((a) => a.name === p.artifactName && !a.expired);
-  if (!artifact) {
-    throw new Error(`no artifact named '${p.artifactName}' on run ${p.runId}`);
-  }
-  if (artifact.size_in_bytes > MAX_ARTIFACT_BYTES) {
-    throw new Error(
-      `artifact '${p.artifactName}' is too large (${artifact.size_in_bytes} bytes) to download`
-    );
-  }
+  const live = (name3) => data.artifacts.find((a) => a.name === name3 && !a.expired);
+  const name2 = summaryArtifactName(p.artifactName);
+  const artifact = live(name2);
+  if (!artifact) throw new Error(`no artifact named '${name2}' on run ${p.runId}`);
+  const tooLarge = () => new Error(`artifact '${name2}' is too large (over ${MAX_SUMMARY_ZIP_BYTES} bytes)`);
+  if (artifact.size_in_bytes > MAX_SUMMARY_ZIP_BYTES) throw tooLarge();
   const zip = await octokit.rest.actions.downloadArtifact({
     owner: p.owner,
     repo: p.repo,
@@ -165888,30 +165887,32 @@ async function downloadSummary(octokit, p) {
   });
   const raw = zip.data;
   const bytesIn = ArrayBuffer.isView(raw) ? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength) : raw instanceof ArrayBuffer ? new Uint8Array(raw) : null;
-  if (!bytesIn) throw new Error(`artifact '${p.artifactName}' download did not return a zip`);
-  let tooLarge = false;
+  if (!bytesIn) throw new Error(`artifact '${name2}' download did not return a zip`);
+  if (bytesIn.length > MAX_SUMMARY_ZIP_BYTES) throw tooLarge();
+  let entryTooLarge = false;
   const entries = unzipSync(bytesIn, {
     filter: (f) => {
       if (f.name !== "summary.json") return false;
-      if (f.originalSize > MAX_SUMMARY_BYTES || f.size > MAX_SUMMARY_BYTES) tooLarge = true;
-      return !tooLarge;
+      if (f.originalSize > MAX_SUMMARY_BYTES || f.size > MAX_SUMMARY_BYTES) entryTooLarge = true;
+      return !entryTooLarge;
     }
   });
   const bytes = entries["summary.json"];
-  if (tooLarge || bytes && bytes.length > MAX_SUMMARY_BYTES) {
+  if (entryTooLarge || bytes && bytes.length > MAX_SUMMARY_BYTES) {
     throw new Error("summary.json is larger than 64 KB");
   }
-  if (!bytes) throw new Error(`artifact '${p.artifactName}' has no summary.json`);
+  if (!bytes) throw new Error(`artifact '${name2}' has no summary.json`);
   return {
     summary: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-    artifactId: artifact.id
+    reportArtifactId: live(p.artifactName)?.id ?? null
   };
 }
 
 // src/publish/comment.ts
 var MARKER = "<!-- pr-diff-graph:v1 -->";
+var ACTIONS_BOT = "github-actions[bot]";
 function codePath(path9) {
-  const safe = path9.replaceAll("`", "\u02CB").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replace(/[\u0000-\u001f\u007f]/g, "\uFFFD");
+  const safe = path9.replaceAll("`", "\u02CB").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[\u202a-\u202e\u2066-\u2069]/g, "");
   return `\`${safe}\``;
 }
 var n = (x2) => x2.toLocaleString("en-US");
@@ -165947,8 +165948,9 @@ async function isOurs(octokit) {
   try {
     const { data } = await octokit.rest.users.getAuthenticated();
     return (c) => c.user?.login === data.login;
-  } catch {
-    return (c) => c.user?.type === "Bot";
+  } catch (e) {
+    if (e?.status !== 403) throw e;
+    return (c) => c.user?.login === ACTIONS_BOT;
   }
 }
 async function upsertStickyComment(octokit, p) {
@@ -165991,6 +165993,7 @@ async function writeJobSummary(s, links, summary2 = summary) {
 
 // src/main.ts
 var FORK_HINT = 'Pull requests from forks get a read-only token, so the report is only in the job summary and the artifact. To comment on them, see "Fork pull requests" in the README.';
+var PERMISSION_HINT = "The token needs the pull-requests: write permission.";
 function isRecord3(x2) {
   return typeof x2 === "object" && x2 !== null;
 }
@@ -166041,8 +166044,9 @@ async function comment(deps, issueNumber, s, links) {
     c.info(result === "none" ? "no sticky comment to update" : `sticky comment ${result}`);
   } catch (e) {
     if (!isForbidden(e)) throw e;
+    const hint = deps.inputs.mode === "full" ? FORK_HINT : PERMISSION_HINT;
     c.warning(
-      `could not comment on pull request #${issueNumber} (${e.message}). ${FORK_HINT}`
+      `could not comment on pull request #${issueNumber} (${e.message}). ${hint}`
     );
   }
 }
@@ -166085,63 +166089,134 @@ async function reportMode(deps) {
     edges: result.graph?.summary.edges ?? 0,
     skipped: result.skipped
   });
-  let artifactUrl = null;
-  if (!result.skipped) {
-    const files = [result.reportPath, result.graphPath, result.summaryPath].filter(
-      (p) => p !== null
-    );
-    artifactUrl = (await deps.upload(files, outDir, inputs.artifactName, inputs.retentionDays)).url;
-  } else if (inputs.mode === "report") {
-    await mkdir3(outDir, { recursive: true });
-    const path9 = await writeSummaryJson(outDir, summary2);
-    await deps.upload([path9], outDir, inputs.artifactName, inputs.retentionDays);
+  const links = { artifactUrl: null, runUrl: runUrl(context5, context5.runId) };
+  try {
+    const days = inputs.retentionDays;
+    if (!result.skipped) {
+      const files = [result.reportPath, result.graphPath, result.summaryPath].filter(
+        (p) => p !== null
+      );
+      links.artifactUrl = (await deps.upload(files, outDir, inputs.artifactName, days)).url;
+    }
+    if (inputs.mode === "report") {
+      await mkdir3(outDir, { recursive: true });
+      const path9 = result.summaryPath ?? await writeSummaryJson(outDir, summary2);
+      await deps.upload([path9], outDir, summaryArtifactName(inputs.artifactName), days);
+    }
+  } finally {
+    await jobSummary(deps, summary2, links);
   }
-  const links = { artifactUrl, runUrl: runUrl(context5, context5.runId) };
-  await jobSummary(deps, summary2, links);
   if (inputs.mode === "full" && inputs.comment) await comment(deps, pr.number, summary2, links);
 }
-async function findPullRequest(octokit, ctx, listed, sha) {
-  const first = Array.isArray(listed) ? listed[0] : void 0;
-  if (isRecord3(first) && typeof first["number"] === "number") return first["number"];
+function triggeringRun(wr) {
+  const id = wr["id"];
+  const headSha = str(wr["head_sha"]);
+  if (typeof id !== "number" || !headSha) return null;
+  const headRepo = isRecord3(wr["head_repository"]) ? str(wr["head_repository"]["full_name"]) : null;
+  const prs = wr["pull_requests"];
+  return {
+    id,
+    headSha,
+    headBranch: str(wr["head_branch"]),
+    headRepo,
+    pullRequests: Array.isArray(prs) ? prs : []
+  };
+}
+function sameName(a, b) {
+  return typeof a === "string" && a.toLowerCase() === b.toLowerCase();
+}
+function isThisRepo(r, ctx) {
+  if (!isRecord3(r)) return false;
+  const full = `${ctx.repo.owner}/${ctx.repo.repo}`;
+  if (typeof r["full_name"] === "string") return sameName(r["full_name"], full);
+  const repository = ctx.payload["repository"];
+  const thisId = isRecord3(repository) ? repository["id"] : void 0;
+  if (typeof r["id"] === "number" && typeof thisId === "number") return r["id"] === thisId;
+  return typeof r["url"] === "string" && r["url"].toLowerCase().endsWith(`/repos/${full}`.toLowerCase());
+}
+async function findPullRequest(octokit, ctx, wr) {
+  const listed = wr.pullRequests.flatMap((p) => {
+    if (!isRecord3(p) || typeof p["number"] !== "number") return [];
+    const base = isRecord3(p["base"]) ? p["base"] : {};
+    const head = isRecord3(p["head"]) ? p["head"] : {};
+    return isThisRepo(base["repo"], ctx) && head["sha"] === wr.headSha ? [p["number"]] : [];
+  });
+  if (listed.length === 1) return { number: listed[0] };
+  if (listed.length > 1) return { ambiguous: listed };
+  if (!wr.headRepo || !wr.headBranch) {
+    return { none: "the event names no head repository or branch to look the PR up by" };
+  }
+  const full = `${ctx.repo.owner}/${ctx.repo.repo}`;
   const { data } = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
     ...ctx.repo,
-    commit_sha: sha,
+    commit_sha: wr.headSha,
     per_page: 100
   });
-  return data.find((p) => p.state === "open" && p.head.sha === sha)?.number ?? null;
+  const found2 = data.filter(
+    (p) => p.state === "open" && p.head.sha === wr.headSha && sameName(p.base.repo.full_name, full) && sameName(p.head.repo?.full_name, wr.headRepo) && p.head.ref === wr.headBranch
+  ).map((p) => p.number);
+  if (found2.length === 1) return { number: found2[0] };
+  if (found2.length > 1) return { ambiguous: found2 };
+  return { none: `no open pull request into ${full} has head ${wr.headSha}` };
 }
 async function commentMode(deps) {
   const { inputs, context: context5, core: c } = deps;
-  const wr = context5.payload["workflow_run"];
-  if (context5.eventName !== "workflow_run" || !isRecord3(wr)) {
+  const event = context5.payload["workflow_run"];
+  if (context5.eventName !== "workflow_run" || !isRecord3(event)) {
     c.info(`mode: comment runs on workflow_run events (this is ${context5.eventName}); skipping`);
     return;
   }
-  if (wr["conclusion"] !== "success") {
-    c.info(`the triggering run concluded with ${String(wr["conclusion"])}; nothing to comment`);
+  if (event["event"] !== "pull_request") {
+    c.info(
+      `the triggering run was for a ${String(event["event"])} event, not pull_request; skipping`
+    );
     return;
   }
-  const runId = wr["id"];
-  const headSha = str(wr["head_sha"]);
-  if (typeof runId !== "number" || !headSha)
-    throw new Error("workflow_run event without id or head_sha");
-  if (!deps.octokit) throw new Error("mode: comment needs github-token");
-  const prNumber = await findPullRequest(deps.octokit, context5, wr["pull_requests"], headSha);
-  if (prNumber === null) {
-    c.info(`no open pull request has head ${headSha}; nothing to comment`);
+  if (event["conclusion"] !== "success") {
+    c.info(`the triggering run concluded with ${String(event["conclusion"])}; nothing to comment`);
     return;
   }
-  const { summary: raw, artifactId } = await deps.download(deps.octokit, {
+  const wr = triggeringRun(event);
+  if (!wr) throw new Error("workflow_run event without id or head_sha");
+  const octokit = deps.octokit;
+  if (!octokit) throw new Error("mode: comment needs github-token");
+  const found2 = await findPullRequest(octokit, context5, wr);
+  if ("ambiguous" in found2) {
+    c.warning(
+      `pull requests ${found2.ambiguous.map((n2) => `#${n2}`).join(", ")} all match the triggering run's head ${wr.headSha}; not commenting`
+    );
+    return;
+  }
+  if ("none" in found2) {
+    c.info(`${found2.none}; nothing to comment`);
+    return;
+  }
+  const { data: pr } = await octokit.rest.pulls.get({ ...context5.repo, pull_number: found2.number });
+  const full = `${context5.repo.owner}/${context5.repo.repo}`;
+  if (pr.state !== "open" || pr.head.sha !== wr.headSha || !sameName(pr.base.repo.full_name, full)) {
+    c.warning(
+      `pull request #${found2.number} is no longer open with head ${wr.headSha} into ${full}; not commenting`
+    );
+    return;
+  }
+  const { summary: raw, reportArtifactId } = await deps.download(octokit, {
     ...context5.repo,
-    runId,
+    runId: wr.id,
     artifactName: inputs.artifactName
   });
   const s = parseSummaryJson(raw);
-  const run3 = runUrl(context5, runId);
+  if (s.headSha !== wr.headSha) {
+    c.warning(
+      `summary.json is for head ${s.headSha}, not the triggering run's ${wr.headSha}; not commenting`
+    );
+    return;
+  }
+  const run3 = runUrl(context5, wr.id);
   setOutputs(c, { files: s.files, edges: s.edges, skipped: s.skipped });
-  const links = { artifactUrl: s.skipped ? null : `${run3}/artifacts/${artifactId}`, runUrl: run3 };
+  const artifactUrl = s.skipped || reportArtifactId === null ? null : `${run3}/artifacts/${reportArtifactId}`;
+  const links = { artifactUrl, runUrl: run3 };
   await jobSummary(deps, s, links);
-  if (inputs.comment) await comment(deps, prNumber, s, links);
+  if (inputs.comment) await comment(deps, found2.number, s, links);
 }
 async function run2(deps) {
   try {

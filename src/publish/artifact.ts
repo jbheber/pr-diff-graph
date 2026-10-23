@@ -3,8 +3,13 @@ import { unzipSync } from 'fflate';
 
 /** Largest `summary.json` accepted from another workflow's artifact. */
 export const MAX_SUMMARY_BYTES = 64 * 1024;
-/** Largest artifact zip `mode: comment` downloads (it also holds the report). */
-export const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
+/** Largest summary artifact zip `mode: comment` downloads. */
+export const MAX_SUMMARY_ZIP_BYTES = 1024 * 1024;
+
+/** The small artifact holding only summary.json, uploaded next to the report artifact `name`. */
+export function summaryArtifactName(name: string): string {
+  return `${name}-summary`;
+}
 
 /** Uploads the report files; the URL is the artifact's page on the run. */
 export async function uploadReport(
@@ -49,29 +54,28 @@ export interface ArtifactOctokit {
 }
 
 /**
- * Downloads the artifact `artifactName` of workflow run `runId` and returns its `summary.json`
- * text (unvalidated; see `parseSummaryJson`) and the artifact id.
+ * Reads `summary.json` from the summary artifact (`<artifactName>-summary`) of workflow run
+ * `runId` (unvalidated; see `parseSummaryJson`), and finds the id of that run's report artifact
+ * (`artifactName`; null when there is none, as for a skipped PR) for the comment's link.
  */
 export async function downloadSummary(
   octokit: ArtifactOctokit,
   p: { owner: string; repo: string; runId: number; artifactName: string },
-): Promise<{ summary: string; artifactId: number }> {
+): Promise<{ summary: string; reportArtifactId: number | null }> {
   const { data } = await octokit.rest.actions.listWorkflowRunArtifacts({
     owner: p.owner,
     repo: p.repo,
     run_id: p.runId,
-    name: p.artifactName,
     per_page: 100,
   });
-  const artifact = data.artifacts.find((a) => a.name === p.artifactName && !a.expired);
-  if (!artifact) {
-    throw new Error(`no artifact named '${p.artifactName}' on run ${p.runId}`);
-  }
-  if (artifact.size_in_bytes > MAX_ARTIFACT_BYTES) {
-    throw new Error(
-      `artifact '${p.artifactName}' is too large (${artifact.size_in_bytes} bytes) to download`,
-    );
-  }
+  const live = (name: string) => data.artifacts.find((a) => a.name === name && !a.expired);
+  const name = summaryArtifactName(p.artifactName);
+  const artifact = live(name);
+  if (!artifact) throw new Error(`no artifact named '${name}' on run ${p.runId}`);
+  const tooLarge = () =>
+    new Error(`artifact '${name}' is too large (over ${MAX_SUMMARY_ZIP_BYTES} bytes)`);
+  if (artifact.size_in_bytes > MAX_SUMMARY_ZIP_BYTES) throw tooLarge();
+
   const zip = await octokit.rest.actions.downloadArtifact({
     owner: p.owner,
     repo: p.repo,
@@ -84,23 +88,24 @@ export async function downloadSummary(
     : raw instanceof ArrayBuffer
       ? new Uint8Array(raw)
       : null;
-  if (!bytesIn) throw new Error(`artifact '${p.artifactName}' download did not return a zip`);
+  if (!bytesIn) throw new Error(`artifact '${name}' download did not return a zip`);
+  if (bytesIn.length > MAX_SUMMARY_ZIP_BYTES) throw tooLarge();
 
-  let tooLarge = false;
+  let entryTooLarge = false;
   const entries = unzipSync(bytesIn, {
     filter: (f) => {
       if (f.name !== 'summary.json') return false;
-      if (f.originalSize > MAX_SUMMARY_BYTES || f.size > MAX_SUMMARY_BYTES) tooLarge = true;
-      return !tooLarge;
+      if (f.originalSize > MAX_SUMMARY_BYTES || f.size > MAX_SUMMARY_BYTES) entryTooLarge = true;
+      return !entryTooLarge;
     },
   });
   const bytes = entries['summary.json'];
-  if (tooLarge || (bytes && bytes.length > MAX_SUMMARY_BYTES)) {
+  if (entryTooLarge || (bytes && bytes.length > MAX_SUMMARY_BYTES)) {
     throw new Error('summary.json is larger than 64 KB');
   }
-  if (!bytes) throw new Error(`artifact '${p.artifactName}' has no summary.json`);
+  if (!bytes) throw new Error(`artifact '${name}' has no summary.json`);
   return {
     summary: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-    artifactId: artifact.id,
+    reportArtifactId: live(p.artifactName)?.id ?? null,
   };
 }

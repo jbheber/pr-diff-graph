@@ -8,7 +8,12 @@ import { run, type RunDeps } from '../../src/main.js';
 import type { PipelineResult } from '../../src/pipeline.js';
 import { MARKER } from '../../src/publish/comment.js';
 import type { CommentSummary } from '../../src/publish/summary.js';
-import { fakeOctokit, httpError, type FakeOptions } from '../helpers/fakeoctokit.js';
+import {
+  fakeOctokit,
+  httpError,
+  type FakeOptions,
+  type FakePullRequest,
+} from '../helpers/fakeoctokit.js';
 
 const BASE = 'b'.repeat(40);
 const HEAD = 'c'.repeat(40);
@@ -83,11 +88,38 @@ function workflowRunContext(wr: Record<string, unknown>): RunDeps['context'] {
   return {
     eventName: 'workflow_run',
     payload: {
-      workflow_run: { id: 42, conclusion: 'success', head_sha: HEAD, pull_requests: [], ...wr },
+      workflow_run: {
+        id: 42,
+        event: 'pull_request',
+        conclusion: 'success',
+        head_sha: HEAD,
+        head_branch: 'feat',
+        head_repository: { full_name: 'fork/r' },
+        pull_requests: [],
+        ...wr,
+      },
+      repository: { id: 1, full_name: 'o/r' },
     },
     repo: { owner: 'o', repo: 'r' },
     runId: 100,
     serverUrl: 'https://github.com',
+  };
+}
+
+/** An open PR into o/r from fork/r:feat at HEAD, as the REST API returns it. */
+function openPr(
+  number: number,
+  over: { state?: string; sha?: string; ref?: string; headRepo?: string; base?: string } = {},
+): FakePullRequest {
+  return {
+    number,
+    state: over.state ?? 'open',
+    head: {
+      sha: over.sha ?? HEAD,
+      ref: over.ref ?? 'feat',
+      repo: { full_name: over.headRepo ?? 'fork/r' },
+    },
+    base: { repo: { full_name: over.base ?? 'o/r' } },
   };
 }
 
@@ -147,7 +179,7 @@ function setup(
     download: vi.fn(async () => {
       const s = over.summaryJson ?? JSON.stringify(validSummary);
       if (s instanceof Error) throw s;
-      return { summary: s, artifactId: 8 };
+      return { summary: s, reportArtifactId: 8 };
     }),
   } satisfies RunDeps;
   return { deps, core, octokit };
@@ -289,30 +321,46 @@ describe('run, mode: report', () => {
     expect(octokit.rest.users.getAuthenticated).not.toHaveBeenCalled();
   });
 
-  it('artifact includes summary.json', async () => {
+  it('uploads the report artifact with summary.json, and summary.json as its own artifact', async () => {
     const { deps } = setup({ inputs: { mode: 'report' } });
     await run(deps);
-    expect(firstArg<string[]>(deps.upload)).toContain('/out/summary.json');
+    const out = join(tmp, 'pr-diff-graph');
+    expect(deps.upload.mock.calls).toEqual([
+      [['/out/report.html', '/out/graph.json', '/out/summary.json'], out, 'pr-diff-graph', 14],
+      [['/out/summary.json'], out, 'pr-diff-graph-summary', 14],
+    ]);
   });
 
   it('below threshold uploads a skipped summary.json so the comment workflow can update', async () => {
     const { deps } = setup({ inputs: { mode: 'report' }, result: skippedResult });
     await run(deps);
-    const [files, root] = deps.upload.mock.calls[0] as unknown as [string[], string];
+    expect(deps.upload).toHaveBeenCalledTimes(1);
+    const [files, root, name] = deps.upload.mock.calls[0] as unknown as [string[], string, string];
     expect(files).toEqual([join(tmp, 'pr-diff-graph', 'summary.json')]);
     expect(root).toBe(join(tmp, 'pr-diff-graph'));
+    expect(name).toBe('pr-diff-graph-summary');
     const s = JSON.parse(await readFile(files[0]!, 'utf8')) as CommentSummary;
     expect(s).toMatchObject({ version: 1, skipped: true, files: 12, headSha: HEAD });
+  });
+
+  it('an upload failure still writes the job summary', async () => {
+    const { deps, core } = setup({ inputs: { mode: 'report' } });
+    deps.upload.mockRejectedValueOnce(new Error('upload broke'));
+    await run(deps);
+    expect(core.summary.write).toHaveBeenCalled();
+    expect(core.setFailed).toHaveBeenCalledWith('upload broke');
   });
 });
 
 describe('run, mode: comment', () => {
   const comment = { mode: 'comment' as const };
+  const listed = { number: 31, head: { sha: HEAD }, base: { repo: { id: 1, name: 'r' } } };
 
   it('takes the PR number from workflow_run.pull_requests[0]', async () => {
     const { deps, octokit } = setup({
       inputs: comment,
-      context: workflowRunContext({ pull_requests: [{ number: 31 }] }),
+      context: workflowRunContext({ pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
     });
     await run(deps);
     expect(deps.pipeline).not.toHaveBeenCalled();
@@ -322,6 +370,7 @@ describe('run, mode: comment', () => {
       runId: 42,
       artifactName: 'pr-diff-graph',
     });
+    expect(octokit.rest.pulls.get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', pull_number: 31 });
     const call = firstArg<{ issue_number: number; body: string }>(
       octokit.rest.issues.createComment,
     );
@@ -330,15 +379,64 @@ describe('run, mode: comment', () => {
     expect(octokit.rest.repos.listPullRequestsAssociatedWithCommit).not.toHaveBeenCalled();
   });
 
+  it('ignores a listed PR whose base is another repo, or whose head is another SHA', async () => {
+    const { deps, octokit } = setup({
+      inputs: comment,
+      context: workflowRunContext({
+        pull_requests: [
+          { ...listed, number: 1, base: { repo: { id: 999, name: 'r' } } },
+          { ...listed, number: 2, head: { sha: 'd'.repeat(40) } },
+        ],
+      }),
+      octokit: { pullRequests: [openPr(1), openPr(2)] },
+    });
+    await run(deps);
+    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(octokit.rest.repos.listPullRequestsAssociatedWithCommit).toHaveBeenCalled();
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it('matches a listed PR by repo URL when ids are missing', async () => {
+    const { deps, octokit } = setup({
+      inputs: comment,
+      context: workflowRunContext({
+        pull_requests: [{ ...listed, base: { repo: { url: 'https://api.github.com/repos/O/R' } } }],
+      }),
+      octokit: { pullRequests: [openPr(31)] },
+    });
+    await run(deps);
+    expect(firstArg<{ issue_number: number }>(octokit.rest.issues.createComment)).toMatchObject({
+      issue_number: 31,
+    });
+  });
+
+  it('does not comment on a closed or stale PR', async () => {
+    for (const pr of [openPr(31, { state: 'closed' }), openPr(31, { sha: 'e'.repeat(40) })]) {
+      const { deps, core, octokit } = setup({
+        inputs: comment,
+        context: workflowRunContext({ pull_requests: [listed] }),
+        octokit: { pullRequests: [pr] },
+      });
+      await run(deps);
+      expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+      expect(deps.download).not.toHaveBeenCalled();
+      expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/no longer open/));
+      expect(core.setFailed).not.toHaveBeenCalled();
+    }
+  });
+
   it('falls back to searching PRs by head SHA when pull_requests is empty (fork)', async () => {
     const { deps, octokit } = setup({
       inputs: comment,
       context: workflowRunContext({}),
       octokit: {
         pullRequests: [
-          { number: 1, state: 'closed', head: { sha: HEAD } },
-          { number: 2, state: 'open', head: { sha: 'd'.repeat(40) } },
-          { number: 3, state: 'open', head: { sha: HEAD } },
+          openPr(1, { state: 'closed' }),
+          openPr(2, { sha: 'd'.repeat(40) }),
+          openPr(4, { base: 'someone/else' }),
+          openPr(5, { headRepo: 'other/fork' }),
+          openPr(6, { ref: 'other-branch' }),
+          openPr(3),
         ],
       },
     });
@@ -349,6 +447,18 @@ describe('run, mode: comment', () => {
     expect(firstArg<{ issue_number: number }>(octokit.rest.issues.createComment)).toMatchObject({
       issue_number: 3,
     });
+  });
+
+  it('refuses to comment when two PRs match in the fallback', async () => {
+    const { deps, core, octokit } = setup({
+      inputs: comment,
+      context: workflowRunContext({}),
+      octokit: { pullRequests: [openPr(3), openPr(7)] },
+    });
+    await run(deps);
+    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/#3, #7/));
   });
 
   it('does nothing when no open PR matches the head SHA', async () => {
@@ -363,7 +473,8 @@ describe('run, mode: comment', () => {
   it('ignores any PR number in summary.json', async () => {
     const { deps, core, octokit } = setup({
       inputs: comment,
-      context: workflowRunContext({ pull_requests: [{ number: 31 }] }),
+      context: workflowRunContext({ pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
       summaryJson: JSON.stringify({ ...validSummary, prNumber: 1 }),
     });
     await run(deps);
@@ -372,10 +483,24 @@ describe('run, mode: comment', () => {
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/summary\.json/));
   });
 
+  it('does not comment when summary.json names another head SHA', async () => {
+    const { deps, core, octokit } = setup({
+      inputs: comment,
+      context: workflowRunContext({ pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
+      summaryJson: JSON.stringify({ ...validSummary, headSha: 'f'.repeat(40) }),
+    });
+    await run(deps);
+    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/summary\.json is for head/));
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
   it('does nothing when the workflow_run concluded with failure', async () => {
     const { deps, core, octokit } = setup({
       inputs: comment,
-      context: workflowRunContext({ conclusion: 'failure', pull_requests: [{ number: 31 }] }),
+      context: workflowRunContext({ conclusion: 'failure', pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
     });
     await run(deps);
     expect(deps.download).not.toHaveBeenCalled();
@@ -384,10 +509,23 @@ describe('run, mode: comment', () => {
     expect(core.setFailed).not.toHaveBeenCalled();
   });
 
+  it('does nothing when the triggering run was not for a pull_request event', async () => {
+    const { deps, core, octokit } = setup({
+      inputs: comment,
+      context: workflowRunContext({ event: 'push', pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
+    });
+    await run(deps);
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(core.info).toHaveBeenCalledWith(expect.stringMatching(/push event, not pull_request/));
+  });
+
   it('rejects an oversized summary', async () => {
     const { deps, core, octokit } = setup({
       inputs: comment,
-      context: workflowRunContext({ pull_requests: [{ number: 31 }] }),
+      context: workflowRunContext({ pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
       summaryJson: new Error('summary.json is larger than 64 KB'),
     });
     await run(deps);
@@ -398,12 +536,28 @@ describe('run, mode: comment', () => {
   it('a skipped summary only updates an existing comment', async () => {
     const { deps, octokit } = setup({
       inputs: comment,
-      context: workflowRunContext({ pull_requests: [{ number: 31 }] }),
+      context: workflowRunContext({ pull_requests: [listed] }),
+      octokit: { pullRequests: [openPr(31)] },
       summaryJson: JSON.stringify({ ...validSummary, skipped: true, files: 3, top: [] }),
     });
     await run(deps);
     expect(octokit.rest.issues.listComments).toHaveBeenCalled();
     expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
+  });
+
+  it('403 on comment names the missing permission, not the fork pattern', async () => {
+    const { deps, core } = setup({
+      inputs: comment,
+      context: workflowRunContext({ pull_requests: [listed] }),
+      octokit: {
+        pullRequests: [openPr(31)],
+        writeError: httpError(403, 'Resource not accessible by integration'),
+      },
+    });
+    await run(deps);
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/pull-requests: write/));
+    expect(core.warning).not.toHaveBeenCalledWith(expect.stringMatching(/Fork pull requests/));
   });
 
   it('only runs on workflow_run events', async () => {

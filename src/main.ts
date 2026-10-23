@@ -8,7 +8,12 @@ import { parseInputs, type ActionInputs } from './inputs.js';
 import { actionsLogger } from './log.js';
 import { grammarDir } from './parsers/treesitter.js';
 import { runPipeline } from './pipeline.js';
-import { downloadSummary, uploadReport, type ArtifactOctokit } from './publish/artifact.js';
+import {
+  downloadSummary,
+  summaryArtifactName,
+  uploadReport,
+  type ArtifactOctokit,
+} from './publish/artifact.js';
 import {
   buildCommentBody,
   upsertStickyComment,
@@ -43,10 +48,11 @@ export interface ActionContext {
   serverUrl: string;
 }
 
-interface AssociatedPr {
+interface PullRequest {
   number: number;
   state: string;
-  head: { sha: string };
+  head: { sha: string; ref: string; repo: { full_name: string } | null };
+  base: { repo: { full_name: string } };
 }
 
 export type ActionOctokit = CommentOctokit &
@@ -58,7 +64,12 @@ export type ActionOctokit = CommentOctokit &
           repo: string;
           commit_sha: string;
           per_page?: number;
-        }): Promise<{ data: AssociatedPr[] }>;
+        }): Promise<{ data: PullRequest[] }>;
+      };
+      pulls: {
+        get(p: { owner: string; repo: string; pull_number: number }): Promise<{
+          data: PullRequest;
+        }>;
       };
     };
   };
@@ -77,6 +88,7 @@ export interface RunDeps {
 const FORK_HINT =
   'Pull requests from forks get a read-only token, so the report is only in the job summary ' +
   'and the artifact. To comment on them, see "Fork pull requests" in the README.';
+const PERMISSION_HINT = 'The token needs the pull-requests: write permission.';
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null;
@@ -157,8 +169,9 @@ async function comment(
     c.info(result === 'none' ? 'no sticky comment to update' : `sticky comment ${result}`);
   } catch (e) {
     if (!isForbidden(e)) throw e;
+    const hint = deps.inputs.mode === 'full' ? FORK_HINT : PERMISSION_HINT;
     c.warning(
-      `could not comment on pull request #${issueNumber} (${(e as Error).message}). ${FORK_HINT}`,
+      `could not comment on pull request #${issueNumber} (${(e as Error).message}). ${hint}`,
     );
   }
 }
@@ -205,80 +218,194 @@ async function reportMode(deps: RunDeps): Promise<void> {
     skipped: result.skipped,
   });
 
-  let artifactUrl: string | null = null;
-  if (!result.skipped) {
-    const files = [result.reportPath, result.graphPath, result.summaryPath].filter(
-      (p): p is string => p !== null,
-    );
-    artifactUrl = (await deps.upload(files, outDir, inputs.artifactName, inputs.retentionDays)).url;
-  } else if (inputs.mode === 'report') {
-    // The comment workflow of the fork pattern needs the skipped summary to update its comment.
-    await mkdir(outDir, { recursive: true });
-    const path = await writeSummaryJson(outDir, summary);
-    await deps.upload([path], outDir, inputs.artifactName, inputs.retentionDays);
+  const links: Links = { artifactUrl: null, runUrl: runUrl(context, context.runId) };
+  // The job summary is written even when an upload fails.
+  try {
+    const days = inputs.retentionDays;
+    if (!result.skipped) {
+      const files = [result.reportPath, result.graphPath, result.summaryPath].filter(
+        (p): p is string => p !== null,
+      );
+      links.artifactUrl = (await deps.upload(files, outDir, inputs.artifactName, days)).url;
+    }
+    if (inputs.mode === 'report') {
+      // The comment workflow of the fork pattern downloads only this small artifact; skipped
+      // PRs get one too, so it can update an existing comment when a PR shrinks.
+      await mkdir(outDir, { recursive: true });
+      const path = result.summaryPath ?? (await writeSummaryJson(outDir, summary));
+      await deps.upload([path], outDir, summaryArtifactName(inputs.artifactName), days);
+    }
+  } finally {
+    await jobSummary(deps, summary, links);
   }
-
-  const links = { artifactUrl, runUrl: runUrl(context, context.runId) };
-  await jobSummary(deps, summary, links);
   if (inputs.mode === 'full' && inputs.comment) await comment(deps, pr.number, summary, links);
 }
 
-/** The open PR whose head is `sha`: from the event, else looked up (fork PRs are not listed). */
+/** The fields of a `workflow_run` event that comment mode binds to. */
+interface TriggeringRun {
+  id: number;
+  headSha: string;
+  headBranch: string | null;
+  headRepo: string | null;
+  pullRequests: unknown[];
+}
+
+function triggeringRun(wr: Record<string, unknown>): TriggeringRun | null {
+  const id = wr['id'];
+  const headSha = str(wr['head_sha']);
+  if (typeof id !== 'number' || !headSha) return null;
+  const headRepo = isRecord(wr['head_repository']) ? str(wr['head_repository']['full_name']) : null;
+  const prs = wr['pull_requests'];
+  return {
+    id,
+    headSha,
+    headBranch: str(wr['head_branch']),
+    headRepo,
+    pullRequests: Array.isArray(prs) ? prs : [],
+  };
+}
+
+function sameName(a: string | null | undefined, b: string): boolean {
+  return typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Whether a repo object of a `workflow_run.pull_requests[]` entry is this repo. Those objects
+ * carry `id`, `url` and `name` but no `full_name`; the id is compared with the event's
+ * `repository.id`, else the API URL's `/repos/<owner>/<repo>` tail.
+ */
+function isThisRepo(r: unknown, ctx: ActionContext): boolean {
+  if (!isRecord(r)) return false;
+  const full = `${ctx.repo.owner}/${ctx.repo.repo}`;
+  if (typeof r['full_name'] === 'string') return sameName(r['full_name'], full);
+  const repository = ctx.payload['repository'];
+  const thisId = isRecord(repository) ? repository['id'] : undefined;
+  if (typeof r['id'] === 'number' && typeof thisId === 'number') return r['id'] === thisId;
+  return (
+    typeof r['url'] === 'string' && r['url'].toLowerCase().endsWith(`/repos/${full}`.toLowerCase())
+  );
+}
+
+type Found = { number: number } | { none: string } | { ambiguous: number[] };
+
+/**
+ * The PR of the triggering run: an event-listed PR into this repo with the run's head SHA, else
+ * (fork PRs are not listed) the one open PR into this repo whose head is the run's SHA, repo
+ * and branch.
+ */
 async function findPullRequest(
   octokit: ActionOctokit,
   ctx: ActionContext,
-  listed: unknown,
-  sha: string,
-): Promise<number | null> {
-  const first = Array.isArray(listed) ? (listed[0] as unknown) : undefined;
-  if (isRecord(first) && typeof first['number'] === 'number') return first['number'];
+  wr: TriggeringRun,
+): Promise<Found> {
+  const listed = wr.pullRequests.flatMap((p) => {
+    if (!isRecord(p) || typeof p['number'] !== 'number') return [];
+    const base = isRecord(p['base']) ? p['base'] : {};
+    const head = isRecord(p['head']) ? p['head'] : {};
+    return isThisRepo(base['repo'], ctx) && head['sha'] === wr.headSha ? [p['number']] : [];
+  });
+  if (listed.length === 1) return { number: listed[0]! };
+  if (listed.length > 1) return { ambiguous: listed };
+
+  if (!wr.headRepo || !wr.headBranch) {
+    return { none: 'the event names no head repository or branch to look the PR up by' };
+  }
+  const full = `${ctx.repo.owner}/${ctx.repo.repo}`;
   const { data } = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
     ...ctx.repo,
-    commit_sha: sha,
+    commit_sha: wr.headSha,
     per_page: 100,
   });
-  return data.find((p) => p.state === 'open' && p.head.sha === sha)?.number ?? null;
+  const found = data
+    .filter(
+      (p) =>
+        p.state === 'open' &&
+        p.head.sha === wr.headSha &&
+        sameName(p.base.repo.full_name, full) &&
+        sameName(p.head.repo?.full_name, wr.headRepo!) &&
+        p.head.ref === wr.headBranch,
+    )
+    .map((p) => p.number);
+  if (found.length === 1) return { number: found[0]! };
+  if (found.length > 1) return { ambiguous: found };
+  return { none: `no open pull request into ${full} has head ${wr.headSha}` };
 }
 
 /**
  * `mode: comment` (the `workflow_run` half of the fork pattern): comment from the
- * `summary.json` of the triggering run's artifact. The file is hostile: it is validated, and
- * the PR number comes from the event, never from it.
+ * `summary.json` of the triggering run's summary artifact. Everything is bound to that run: it
+ * must be a successful `pull_request` run, the PR is found from the event (never from the file)
+ * and re-checked with the API, and the file is validated and must name the run's head SHA.
  */
 async function commentMode(deps: RunDeps): Promise<void> {
   const { inputs, context, core: c } = deps;
-  const wr = context.payload['workflow_run'];
-  if (context.eventName !== 'workflow_run' || !isRecord(wr)) {
+  const event = context.payload['workflow_run'];
+  if (context.eventName !== 'workflow_run' || !isRecord(event)) {
     c.info(`mode: comment runs on workflow_run events (this is ${context.eventName}); skipping`);
     return;
   }
-  if (wr['conclusion'] !== 'success') {
-    c.info(`the triggering run concluded with ${String(wr['conclusion'])}; nothing to comment`);
+  if (event['event'] !== 'pull_request') {
+    c.info(
+      `the triggering run was for a ${String(event['event'])} event, not pull_request; skipping`,
+    );
     return;
   }
-  const runId = wr['id'];
-  const headSha = str(wr['head_sha']);
-  if (typeof runId !== 'number' || !headSha)
-    throw new Error('workflow_run event without id or head_sha');
-  if (!deps.octokit) throw new Error('mode: comment needs github-token');
+  if (event['conclusion'] !== 'success') {
+    c.info(`the triggering run concluded with ${String(event['conclusion'])}; nothing to comment`);
+    return;
+  }
+  const wr = triggeringRun(event);
+  if (!wr) throw new Error('workflow_run event without id or head_sha');
+  const octokit = deps.octokit;
+  if (!octokit) throw new Error('mode: comment needs github-token');
 
-  const prNumber = await findPullRequest(deps.octokit, context, wr['pull_requests'], headSha);
-  if (prNumber === null) {
-    c.info(`no open pull request has head ${headSha}; nothing to comment`);
+  const found = await findPullRequest(octokit, context, wr);
+  if ('ambiguous' in found) {
+    c.warning(
+      `pull requests ${found.ambiguous.map((n) => `#${n}`).join(', ')} all match the ` +
+        `triggering run's head ${wr.headSha}; not commenting`,
+    );
     return;
   }
-  const { summary: raw, artifactId } = await deps.download(deps.octokit, {
+  if ('none' in found) {
+    c.info(`${found.none}; nothing to comment`);
+    return;
+  }
+  const { data: pr } = await octokit.rest.pulls.get({ ...context.repo, pull_number: found.number });
+  const full = `${context.repo.owner}/${context.repo.repo}`;
+  if (
+    pr.state !== 'open' ||
+    pr.head.sha !== wr.headSha ||
+    !sameName(pr.base.repo.full_name, full)
+  ) {
+    c.warning(
+      `pull request #${found.number} is no longer open with head ${wr.headSha} into ${full}; ` +
+        'not commenting',
+    );
+    return;
+  }
+
+  const { summary: raw, reportArtifactId } = await deps.download(octokit, {
     ...context.repo,
-    runId,
+    runId: wr.id,
     artifactName: inputs.artifactName,
   });
   const s = parseSummaryJson(raw);
-  const run = runUrl(context, runId);
+  if (s.headSha !== wr.headSha) {
+    c.warning(
+      `summary.json is for head ${s.headSha}, not the triggering run's ${wr.headSha}; ` +
+        'not commenting',
+    );
+    return;
+  }
+  const run = runUrl(context, wr.id);
   setOutputs(c, { files: s.files, edges: s.edges, skipped: s.skipped });
 
-  const links = { artifactUrl: s.skipped ? null : `${run}/artifacts/${artifactId}`, runUrl: run };
+  const artifactUrl =
+    s.skipped || reportArtifactId === null ? null : `${run}/artifacts/${reportArtifactId}`;
+  const links = { artifactUrl, runUrl: run };
   await jobSummary(deps, s, links);
-  if (inputs.comment) await comment(deps, prNumber, s, links);
+  if (inputs.comment) await comment(deps, found.number, s, links);
 }
 
 export async function run(deps: RunDeps): Promise<void> {
