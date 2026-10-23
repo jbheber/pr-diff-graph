@@ -91,6 +91,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     const { graph, diffs } = buildGraph({
       pr: { number: opts.prNumber, base, head, mergeBase, repo: opts.repoSlug },
       files,
+      allChangedFiles: raw,
       imports,
       headIndex,
       baseIndex,

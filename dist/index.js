@@ -80290,7 +80290,7 @@ var require_headers3 = __commonJS({
     function isGNU(buf) {
       return b4a.equals(GNU_MAGIC, buf.subarray(MAGIC_OFFSET, MAGIC_OFFSET + 6)) && b4a.equals(GNU_VER, buf.subarray(VERSION_OFFSET, VERSION_OFFSET + 2));
     }
-    function clamp(index2, len, defaultValue) {
+    function clamp2(index2, len, defaultValue) {
       if (typeof index2 !== "number") return defaultValue;
       index2 = ~~index2;
       if (index2 >= len) return len;
@@ -80409,7 +80409,7 @@ var require_headers3 = __commonJS({
         return parse256(val);
       } else {
         while (offset < val.length && val[offset] === 32) offset++;
-        const end = clamp(indexOf(val, 32, offset, val.length), val.length, val.length);
+        const end = clamp2(indexOf(val, 32, offset, val.length), val.length, val.length);
         while (offset < end && val[offset] === 0) offset++;
         if (end === offset) return 0;
         return parseInt(b4a.toString(val.subarray(offset, end)), 8);
@@ -85129,7 +85129,7 @@ var require_clamp = __commonJS({
     var $TypeError = require_type();
     var max2 = require_max();
     var min = require_min();
-    module2.exports = function clamp(x2, lower, upper) {
+    module2.exports = function clamp2(x2, lower, upper) {
       if (typeof x2 !== "number" || typeof lower !== "number" || typeof upper !== "number" || !(lower <= upper)) {
         throw new $TypeError("Assertion failed: all three arguments must be MVs, and `lower` must be `<= upper`");
       }
@@ -85142,7 +85142,7 @@ var require_clamp = __commonJS({
 var require_ToUint8Clamp = __commonJS({
   "node_modules/es-abstract/2025/ToUint8Clamp.js"(exports2, module2) {
     "use strict";
-    var clamp = require_clamp();
+    var clamp2 = require_clamp();
     var ToNumber = require_ToNumber();
     var floor = require_floor2();
     var $isNaN = require_isNaN();
@@ -85151,7 +85151,7 @@ var require_ToUint8Clamp = __commonJS({
       if ($isNaN(number4)) {
         return 0;
       }
-      var clamped = clamp(number4, 0, 255);
+      var clamped = clamp2(number4, 0, 255);
       var f = floor(clamped);
       if (clamped < f + 0.5) {
         return f;
@@ -101512,6 +101512,15 @@ async function initTreeSitter(dir2, log3 = consoleLogger) {
   );
   return { language: (name2) => languages.get(name2) ?? null };
 }
+function compileQuery(language, source, grammar, log3) {
+  if (!language) return null;
+  try {
+    return new Query(language, source);
+  } catch (e) {
+    log3.warn(`tree-sitter query for '${grammar}' failed to compile: ${e.message}`);
+    return null;
+  }
+}
 var parsers = /* @__PURE__ */ new WeakMap();
 function withTree(language, source, fn) {
   let parser = parsers.get(language);
@@ -102027,12 +102036,12 @@ function buildGraph(args2) {
   const changedIds = new Set(files.map((f) => f.path));
   const renamedTo = /* @__PURE__ */ new Map();
   const gone = /* @__PURE__ */ new Set();
-  for (const f of files) {
+  for (const f of args2.allChangedFiles ?? files) {
     if (f.status === "deleted") gone.add(f.path);
-    if (f.status === "renamed" && f.oldPath) {
-      renamedTo.set(f.oldPath, f.path);
-      gone.add(f.oldPath);
-    }
+    if (f.status === "renamed" && f.oldPath) gone.add(f.oldPath);
+  }
+  for (const f of files) {
+    if (f.status === "renamed" && f.oldPath) renamedTo.set(f.oldPath, f.path);
   }
   const nodes = /* @__PURE__ */ new Map();
   const clusterInputs = [];
@@ -102105,6 +102114,8 @@ function buildGraph(args2) {
           const target = changedIds.has(p) ? p : deleted ? renamedTo.get(p) ?? p : p;
           if (changedIds.has(target)) {
             addEdge(f.path, target, "changed-changed", imp.kind);
+          } else if (deleted && !args2.headIndex.has(target)) {
+            continue;
           } else {
             addUnchanged(target);
             addEdge(f.path, target, "changed-unchanged", imp.kind);
@@ -102195,7 +102206,7 @@ async function collectImports(args2) {
     } else if (job.index === headIndex) {
       for (const e of entry.imports) {
         if (e.res.kind === "unresolved")
-          e.baseRes = safeResolve(job.parser, e, job.path, baseIndex);
+          e.baseRes = safeResolve(job.parser, e.imp, job.path, baseIndex);
       }
     }
     result.set(job.path, entry);
@@ -102238,22 +102249,23 @@ function parseFile(job, blob) {
   if (blob.length > MAX_PARSE_BYTES) {
     return { language, parseError: "file too large to parse", imports: [] };
   }
+  let raw;
   try {
-    const raw = job.parser.parse(blob.toString("utf8"), job.path);
-    const imports = raw.map((imp) => ({
-      imp,
-      res: job.parser.resolve(imp, job.path, job.index)
-    }));
-    return { language, parseError: null, imports };
+    raw = job.parser.parse(blob.toString("utf8"), job.path);
   } catch (e) {
     return { language, parseError: e.message || "parse failed", imports: [] };
   }
+  const imports = raw.map((imp) => ({
+    imp,
+    res: safeResolve(job.parser, imp, job.path, job.index)
+  }));
+  return { language, parseError: null, imports };
 }
-function safeResolve(parser, e, from, index2) {
+function safeResolve(parser, imp, from, index2) {
   try {
-    return parser.resolve(e.imp, from, index2);
-  } catch {
-    return void 0;
+    return parser.resolve(imp, from, index2);
+  } catch (e) {
+    return { kind: "unresolved", reason: `resolver error: ${e.message}` };
   }
 }
 async function forEachBlob(reader, jobs, fn) {
@@ -102401,7 +102413,7 @@ function extract(language, query, source, path9) {
 }
 function goParser(rt, log3) {
   const language = rt.language("go");
-  const query = language ? new Query(language, QUERY) : null;
+  const query = compileQuery(language, QUERY, "go", log3);
   let warned = false;
   return {
     id: "go",
@@ -102502,7 +102514,7 @@ function extract2(language, query, source, path9) {
 }
 function pythonParser(rt, log3) {
   const language = rt.language("python");
-  const query = language ? new Query(language, QUERY2) : null;
+  const query = compileQuery(language, QUERY2, "python", log3);
   let warned = false;
   return {
     id: "python",
@@ -102591,7 +102603,7 @@ function conditionTargets(value, star) {
   if (Array.isArray(value)) return value.flatMap((v) => conditionTargets(v, star));
   if (!isRecord(value)) return [];
   const keys = [
-    ...CONDITIONS.filter((c) => c in value),
+    ...CONDITIONS.filter((c) => Object.hasOwn(value, c)),
     ...Object.keys(value).filter((k) => !CONDITIONS.includes(k))
   ];
   return keys.flatMap((k) => conditionTargets(value[k], star));
@@ -102599,7 +102611,7 @@ function conditionTargets(value, star) {
 function exportTargets(exports2, subpath) {
   const isSubpathMap = isRecord(exports2) && Object.keys(exports2).some((k) => k === "." || k.startsWith("./"));
   if (!isSubpathMap) return subpath === "." ? conditionTargets(exports2, null) : null;
-  if (subpath in exports2) return conditionTargets(exports2[subpath], null);
+  if (Object.hasOwn(exports2, subpath)) return conditionTargets(exports2[subpath], null);
   let best = null;
   for (const key of Object.keys(exports2)) {
     const at = key.indexOf("*");
@@ -102635,7 +102647,7 @@ function resolveWorkspace(repo, pkg, spec) {
   return srcIndex(repo, pkg.dir) ?? resolvePath(repo, pkg.dir);
 }
 function matchPaths(paths, spec) {
-  if (paths[spec]) return { targets: paths[spec], star: "", pattern: spec };
+  if (Object.hasOwn(paths, spec)) return { targets: paths[spec], star: "", pattern: spec };
   let best = null;
   for (const [pattern, targets] of Object.entries(paths)) {
     const at = pattern.indexOf("*");
@@ -102752,7 +102764,8 @@ function typescriptParser(rt, log3) {
   const queries = /* @__PURE__ */ new Map();
   for (const name2 of ["typescript", "tsx"]) {
     const language = rt.language(name2);
-    if (language) queries.set(name2, new Query(language, QUERY3));
+    const query = compileQuery(language, QUERY3, name2, log3);
+    if (query) queries.set(name2, query);
   }
   let warned = false;
   return {
@@ -122533,20 +122546,24 @@ var schema = external_exports.object({
   top: external_exports.array(external_exports.string().max(MAX_PATH)).max(TOP_FILES),
   headSha: external_exports.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
 }).strict();
+var clamp = (n2) => Math.min(Math.max(Math.trunc(n2) || 0, 0), MAX_COUNT);
+function fitPath(path9) {
+  return path9.length <= MAX_PATH ? path9 : "\u2026" + path9.slice(path9.length - (MAX_PATH - 1));
+}
 function toCommentSummary(result, minFiles, headSha) {
   const s = result.graph?.summary;
   return {
     version: 1,
     skipped: result.skipped,
-    minFiles,
-    files: s?.files ?? result.filesChanged,
-    additions: s?.additions ?? 0,
-    deletions: s?.deletions ?? 0,
-    edges: s?.edges ?? 0,
-    cycles: s?.cycles ?? 0,
-    unresolved: s?.unresolved ?? 0,
-    parseErrors: s?.parseErrors ?? 0,
-    top: (result.graph?.ranking ?? []).slice(0, TOP_FILES),
+    minFiles: clamp(minFiles),
+    files: clamp(s?.files ?? result.filesChanged),
+    additions: clamp(s?.additions ?? 0),
+    deletions: clamp(s?.deletions ?? 0),
+    edges: clamp(s?.edges ?? 0),
+    cycles: clamp(s?.cycles ?? 0),
+    unresolved: clamp(s?.unresolved ?? 0),
+    parseErrors: clamp(s?.parseErrors ?? 0),
+    top: (result.graph?.ranking ?? []).slice(0, TOP_FILES).map(fitPath),
     headSha
   };
 }
@@ -123690,7 +123707,15 @@ function findWorkspaces(manifests, log3, packages = parsePackageJsons(manifests,
       found2.set(dir2, { name: name2, dir: dir2, manifest: manifestFields(pkg) });
     }
   };
-  for (const [dir2, pkg] of packages) addFrom(dir2, packageJsonPatterns(pkg));
+  for (const [dir2, pkg] of packages) {
+    try {
+      addFrom(dir2, packageJsonPatterns(pkg));
+    } catch {
+      log3.warn(
+        `could not expand the workspaces of ${dir2 ? dir2 + "/" : ""}package.json; ignoring them`
+      );
+    }
+  }
   for (const [path9, text] of manifests) {
     if (baseOf(path9) !== "pnpm-workspace.yaml") continue;
     try {
@@ -123880,6 +123905,7 @@ async function runPipeline(opts) {
     const { graph, diffs } = buildGraph({
       pr: { number: opts.prNumber, base, head, mergeBase, repo: opts.repoSlug },
       files,
+      allChangedFiles: raw,
       imports,
       headIndex,
       baseIndex,

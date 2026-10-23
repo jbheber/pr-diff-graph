@@ -1,8 +1,8 @@
-import { Query, type Language } from 'web-tree-sitter';
+import { type Query, type Language } from 'web-tree-sitter';
 import type { Logger } from '../log.js';
 import { resolveGoImport } from './go-resolve.js';
 import { regexImports } from './regex-fallback.js';
-import { withTree, type TreeSitterRuntime } from './treesitter.js';
+import { compileQuery, withTree, type TreeSitterRuntime } from './treesitter.js';
 import { ParseError, type LanguageParser, type RawImport } from './types.js';
 
 const QUERY = `(import_spec path: (_) @path)`;
@@ -25,7 +25,7 @@ function extract(language: Language, query: Query, source: string, path: string)
 
 export function goParser(rt: TreeSitterRuntime, log: Logger): LanguageParser {
   const language = rt.language('go');
-  const query = language ? new Query(language, QUERY) : null;
+  const query = compileQuery(language, QUERY, 'go', log);
   let warned = false;
 
   return {

@@ -19,6 +19,11 @@ export interface BuildGraphArgs {
   /** The changed files after filtering. */
   files: ChangedFile[];
   /**
+   * Every changed file before filtering (default: `files`), so deletions and renames under
+   * excluded paths still explain imports of them as 'target deleted'.
+   */
+  allChangedFiles?: ChangedFile[];
+  /**
    * Parsed imports by path: changed files (deleted ones parsed at the merge base), plus
    * unchanged files — either language-only entries for outgoing neighbors or, with
    * scan-repo, parsed files whose imports may reach changed files.
@@ -40,12 +45,12 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
   const renamedTo = new Map<string, string>();
   /** Paths that existed at the merge base and are gone at head. */
   const gone = new Set<string>();
-  for (const f of files) {
+  for (const f of args.allChangedFiles ?? files) {
     if (f.status === 'deleted') gone.add(f.path);
-    if (f.status === 'renamed' && f.oldPath) {
-      renamedTo.set(f.oldPath, f.path);
-      gone.add(f.oldPath);
-    }
+    if (f.status === 'renamed' && f.oldPath) gone.add(f.oldPath);
+  }
+  for (const f of files) {
+    if (f.status === 'renamed' && f.oldPath) renamedTo.set(f.oldPath, f.path);
   }
 
   const nodes = new Map<string, GraphNode>();
@@ -125,6 +130,8 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
           const target = changedIds.has(p) ? p : deleted ? (renamedTo.get(p) ?? p) : p;
           if (changedIds.has(target)) {
             addEdge(f.path, target, 'changed-changed', imp.kind);
+          } else if (deleted && !args.headIndex.has(target)) {
+            continue; // the neighbor is gone at head too: nothing to show
           } else {
             addUnchanged(target);
             addEdge(f.path, target, 'changed-unchanged', imp.kind);

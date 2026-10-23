@@ -1,8 +1,8 @@
-import { Query, type Language, type Node } from 'web-tree-sitter';
+import { type Query, type Language, type Node } from 'web-tree-sitter';
 import type { Logger } from '../log.js';
 import { resolvePythonImport } from './python-resolve.js';
 import { regexImports } from './regex-fallback.js';
-import { withTree, type TreeSitterRuntime } from './treesitter.js';
+import { compileQuery, withTree, type TreeSitterRuntime } from './treesitter.js';
 import { ParseError, type LanguageParser, type RawImport } from './types.js';
 
 const EXTENSIONS = ['.py', '.pyi'];
@@ -47,7 +47,7 @@ function extract(language: Language, query: Query, source: string, path: string)
 
 export function pythonParser(rt: TreeSitterRuntime, log: Logger): LanguageParser {
   const language = rt.language('python');
-  const query = language ? new Query(language, QUERY) : null;
+  const query = compileQuery(language, QUERY, 'python', log);
   let warned = false;
 
   return {

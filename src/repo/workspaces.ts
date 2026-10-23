@@ -88,7 +88,15 @@ export function findWorkspaces(
     }
   };
 
-  for (const [dir, pkg] of packages) addFrom(dir, packageJsonPatterns(pkg));
+  for (const [dir, pkg] of packages) {
+    try {
+      addFrom(dir, packageJsonPatterns(pkg));
+    } catch {
+      log.warn(
+        `could not expand the workspaces of ${dir ? dir + '/' : ''}package.json; ignoring them`,
+      );
+    }
+  }
 
   for (const [path, text] of manifests) {
     if (baseOf(path) !== 'pnpm-workspace.yaml') continue;

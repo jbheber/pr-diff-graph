@@ -1,8 +1,8 @@
-import { Query, type Language, type Node } from 'web-tree-sitter';
+import { type Query, type Language, type Node } from 'web-tree-sitter';
 import type { Logger } from '../log.js';
 import { regexImports } from './regex-fallback.js';
 import { resolveTsImport } from './typescript-resolve.js';
-import { withTree, type GrammarName, type TreeSitterRuntime } from './treesitter.js';
+import { compileQuery, withTree, type GrammarName, type TreeSitterRuntime } from './treesitter.js';
 import { ParseError, type LanguageParser, type RawImport } from './types.js';
 
 const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
@@ -74,7 +74,8 @@ export function typescriptParser(rt: TreeSitterRuntime, log: Logger): LanguagePa
   const queries = new Map<GrammarName, Query>();
   for (const name of ['typescript', 'tsx'] as const) {
     const language = rt.language(name);
-    if (language) queries.set(name, new Query(language, QUERY));
+    const query = compileQuery(language, QUERY, name, log);
+    if (query) queries.set(name, query);
   }
   let warned = false;
 

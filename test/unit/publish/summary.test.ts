@@ -68,6 +68,29 @@ describe('toCommentSummary', () => {
     });
   });
 
+  it('round-trips through parseSummaryJson even with very long paths and huge counts', () => {
+    const long = 'd/'.repeat(300) + 'file.ts';
+    const graph = {
+      summary: {
+        files: 99_999_999,
+        additions: 99_999_999,
+        deletions: 99_999_999,
+        edges: 99_999_999,
+        cycles: 99_999_999,
+        unresolved: 99_999_999,
+        parseErrors: 99_999_999,
+      },
+      ranking: [long, 'short.ts'],
+    } as unknown as GraphJson;
+    const s = toCommentSummary(result({ filesChanged: 5, graph }), 50, 'a'.repeat(40));
+    const back = parseSummaryJson(JSON.stringify(s));
+    expect(back.top[0]).toHaveLength(300);
+    expect(back.top[0]!.startsWith('\u2026')).toBe(true);
+    expect(back.top[0]!.endsWith('file.ts')).toBe(true);
+    expect(back.top[1]).toBe('short.ts');
+    expect(back.files).toBe(10_000_000);
+  });
+
   it('skipped result: file count only', () => {
     const s = toCommentSummary(result({ skipped: true, filesChanged: 7 }), 50, 'abc');
     expect(s).toMatchObject({ skipped: true, files: 7, edges: 0, top: [] });

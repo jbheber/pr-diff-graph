@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Language, Parser, type Tree } from 'web-tree-sitter';
+import { Language, Parser, Query, type Tree } from 'web-tree-sitter';
 import { consoleLogger, type Logger } from '../log.js';
 
 export type GrammarName = 'typescript' | 'tsx' | 'javascript' | 'python' | 'go';
@@ -60,6 +60,25 @@ export async function initTreeSitter(
     }),
   );
   return { language: (name) => languages.get(name) ?? null };
+}
+
+/**
+ * Compiles `source` for `language`; on failure warns and returns null so the caller falls
+ * back to the regex extractor instead of failing the run.
+ */
+export function compileQuery(
+  language: Language | null,
+  source: string,
+  grammar: GrammarName,
+  log: Logger,
+): Query | null {
+  if (!language) return null;
+  try {
+    return new Query(language, source);
+  } catch (e) {
+    log.warn(`tree-sitter query for '${grammar}' failed to compile: ${(e as Error).message}`);
+    return null;
+  }
 }
 
 const parsers = new WeakMap<Language, Parser>();

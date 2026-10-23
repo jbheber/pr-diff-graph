@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { indexOf } from './helpers.js';
+import { indexOf, recordingLogger } from './helpers.js';
 
 const pkg = (name: string, extra: object = {}) => JSON.stringify({ name, ...extra });
 
@@ -69,5 +69,19 @@ describe('workspaces', () => {
   it('ignores a malformed package.json with a warning', async () => {
     const idx = await indexOf({ 'package.json': '{ nope', 'a/package.json': pkg('a') });
     expect(idx.workspaces).toEqual([]);
+  });
+
+  it('a workspaces glob that cannot be expanded warns and keeps the other roots', async () => {
+    const log = recordingLogger();
+    const idx = await indexOf(
+      {
+        'package.json': JSON.stringify({ workspaces: ['./'] }),
+        'a/package.json': JSON.stringify({ name: 'a', workspaces: ['b'] }),
+        'a/b/package.json': pkg('b'),
+      },
+      log,
+    );
+    expect(idx.workspaces.map((w) => w.name)).toEqual(['b']);
+    expect(log.warnings.some((w) => w.includes('package.json'))).toBe(true);
   });
 });

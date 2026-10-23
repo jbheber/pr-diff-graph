@@ -47,6 +47,14 @@ const schema = z
   })
   .strict();
 
+const clamp = (n: number): number => Math.min(Math.max(Math.trunc(n) || 0, 0), MAX_COUNT);
+
+/** Keeps the end of a path (the file name), marking the cut with an ellipsis. */
+function fitPath(path: string): string {
+  return path.length <= MAX_PATH ? path : '\u2026' + path.slice(path.length - (MAX_PATH - 1));
+}
+
+/** Builds a summary that always passes `parseSummaryJson`: long paths and counts are clamped. */
 export function toCommentSummary(
   result: PipelineResult,
   minFiles: number,
@@ -56,15 +64,15 @@ export function toCommentSummary(
   return {
     version: 1,
     skipped: result.skipped,
-    minFiles,
-    files: s?.files ?? result.filesChanged,
-    additions: s?.additions ?? 0,
-    deletions: s?.deletions ?? 0,
-    edges: s?.edges ?? 0,
-    cycles: s?.cycles ?? 0,
-    unresolved: s?.unresolved ?? 0,
-    parseErrors: s?.parseErrors ?? 0,
-    top: (result.graph?.ranking ?? []).slice(0, TOP_FILES),
+    minFiles: clamp(minFiles),
+    files: clamp(s?.files ?? result.filesChanged),
+    additions: clamp(s?.additions ?? 0),
+    deletions: clamp(s?.deletions ?? 0),
+    edges: clamp(s?.edges ?? 0),
+    cycles: clamp(s?.cycles ?? 0),
+    unresolved: clamp(s?.unresolved ?? 0),
+    parseErrors: clamp(s?.parseErrors ?? 0),
+    top: (result.graph?.ranking ?? []).slice(0, TOP_FILES).map(fitPath),
     headSha,
   };
 }

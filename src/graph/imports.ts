@@ -2,7 +2,12 @@ import type { ChangedFile } from '../diff/collect.js';
 import type { BlobReader } from '../diff/git.js';
 import type { Logger } from '../log.js';
 import type { ParserRegistry } from '../parsers/registry.js';
-import { MAX_PARSE_BYTES, type LanguageParser } from '../parsers/types.js';
+import {
+  MAX_PARSE_BYTES,
+  type LanguageParser,
+  type RawImport,
+  type Resolution,
+} from '../parsers/types.js';
 import type { RepoIndex } from '../repo/index.js';
 import type { FileImports, ImportEntry } from './types.js';
 
@@ -56,7 +61,7 @@ export async function collectImports(args: CollectImportsArgs): Promise<Map<stri
       // resolved at the merge base so the graph can tell the two apart.
       for (const e of entry.imports) {
         if (e.res.kind === 'unresolved')
-          e.baseRes = safeResolve(job.parser, e, job.path, baseIndex);
+          e.baseRes = safeResolve(job.parser, e.imp, job.path, baseIndex);
       }
     }
     result.set(job.path, entry);
@@ -103,23 +108,30 @@ function parseFile(job: Job, blob: Buffer | null): FileImports {
   if (blob.length > MAX_PARSE_BYTES) {
     return { language, parseError: 'file too large to parse', imports: [] };
   }
+  let raw;
   try {
-    const raw = job.parser.parse(blob.toString('utf8'), job.path);
-    const imports: ImportEntry[] = raw.map((imp) => ({
-      imp,
-      res: job.parser.resolve(imp, job.path, job.index),
-    }));
-    return { language, parseError: null, imports };
+    raw = job.parser.parse(blob.toString('utf8'), job.path);
   } catch (e) {
     return { language, parseError: (e as Error).message || 'parse failed', imports: [] };
   }
+  const imports: ImportEntry[] = raw.map((imp) => ({
+    imp,
+    res: safeResolve(job.parser, imp, job.path, job.index),
+  }));
+  return { language, parseError: null, imports };
 }
 
-function safeResolve(parser: LanguageParser, e: ImportEntry, from: string, index: RepoIndex) {
+/** Resolves one import; a resolver that throws costs that import only, not the file. */
+function safeResolve(
+  parser: LanguageParser,
+  imp: RawImport,
+  from: string,
+  index: RepoIndex,
+): Resolution {
   try {
-    return parser.resolve(e.imp, from, index);
-  } catch {
-    return undefined;
+    return parser.resolve(imp, from, index);
+  } catch (e) {
+    return { kind: 'unresolved', reason: `resolver error: ${(e as Error).message}` };
   }
 }
 

@@ -98,7 +98,7 @@ function conditionTargets(value: unknown, star: string | null): string[] {
   if (Array.isArray(value)) return value.flatMap((v) => conditionTargets(v, star));
   if (!isRecord(value)) return []; // null: explicitly blocked
   const keys = [
-    ...CONDITIONS.filter((c) => c in value),
+    ...CONDITIONS.filter((c) => Object.hasOwn(value, c)),
     ...Object.keys(value).filter((k) => !CONDITIONS.includes(k)),
   ];
   return keys.flatMap((k) => conditionTargets(value[k], star));
@@ -113,7 +113,7 @@ function exportTargets(exports: unknown, subpath: string): string[] | null {
     isRecord(exports) && Object.keys(exports).some((k) => k === '.' || k.startsWith('./'));
   if (!isSubpathMap) return subpath === '.' ? conditionTargets(exports, null) : null;
 
-  if (subpath in exports) return conditionTargets(exports[subpath], null);
+  if (Object.hasOwn(exports, subpath)) return conditionTargets(exports[subpath], null);
   let best: { key: string; star: string } | null = null;
   for (const key of Object.keys(exports)) {
     const at = key.indexOf('*');
@@ -161,7 +161,7 @@ function matchPaths(
   paths: Record<string, string[]>,
   spec: string,
 ): { targets: string[]; star: string; pattern: string } | null {
-  if (paths[spec]) return { targets: paths[spec], star: '', pattern: spec };
+  if (Object.hasOwn(paths, spec)) return { targets: paths[spec]!, star: '', pattern: spec };
   let best: { targets: string[]; star: string; pattern: string } | null = null;
   for (const [pattern, targets] of Object.entries(paths)) {
     const at = pattern.indexOf('*');

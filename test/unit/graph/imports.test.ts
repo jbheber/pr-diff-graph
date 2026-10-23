@@ -108,4 +108,37 @@ describe('collectImports', () => {
     expect([...imports.keys()].sort()).toEqual(['a.ts', 'x.ts']);
     expect(imports.get('x.ts')?.imports.map((e) => e.imp.specifier)).toEqual(['./a']);
   });
+
+  it("a resolver throw on one import keeps the file's other imports", async () => {
+    const saved = registry;
+    const real = saved.forPath('a.ts')!;
+    const flaky: ParserRegistry = {
+      ...registry,
+      forPath: (path) =>
+        path === 'a.ts'
+          ? {
+              ...real,
+              resolve(imp, from, repo) {
+                if (imp.specifier === './boom') throw new Error('kaboom');
+                return real.resolve(imp, from, repo);
+              },
+            }
+          : saved.forPath(path),
+    };
+    registry = flaky;
+    try {
+      const { imports } = await importsOf(
+        { 'b.ts': '' },
+        { 'a.ts': "import './boom';\nimport './b';\n", 'b.ts': '' },
+      );
+      const a = imports.get('a.ts')!;
+      expect(a.parseError).toBeNull();
+      expect(a.imports.map((e) => e.res)).toEqual([
+        { kind: 'unresolved', reason: 'resolver error: kaboom' },
+        { kind: 'file', paths: ['b.ts'] },
+      ]);
+    } finally {
+      registry = saved;
+    }
+  });
 });

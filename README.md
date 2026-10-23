@@ -38,7 +38,7 @@ jobs:
       - uses: jbheber/pr-diff-graph@v1
 ```
 
-On a PR with more than 50 changed files the action comments with the totals, cycles, unresolved imports and the top files to review first, and links the `pr-diff-graph` artifact. Download it and open `report.html`. Smaller PRs are skipped.
+On a PR with more than 50 changed files the action comments with the totals, cycles, unresolved imports and the top files to review first, and links the `pr-diff-graph` artifact. Download it and open `report.html`. A PR with `min-files` (default 50) changed files or fewer is skipped: no report and no new comment, but if a sticky comment already exists (the PR shrank) it is updated to say the PR was skipped.
 
 `fetch-depth: 0` is recommended. With a shallow checkout the action fetches the base and deepens until it finds the merge base, and warns.
 
@@ -165,6 +165,7 @@ Files without a parser (for example Markdown, JSON, Rust) still appear as nodes 
 - Files with no parser (and binary files) appear as nodes without edges; binary files have no diff either.
 - If a WASM grammar fails to load, a regex fallback is used for that language. It is lower fidelity and logged as a warning.
 - A GitHub App installation token creates a new comment on every run (see Tokens).
+- Two jobs that use the action in the same workflow run must set distinct `artifact-name`s; artifact names are unique per run.
 
 ## Adding a language parser
 

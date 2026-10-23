@@ -13515,6 +13515,15 @@ async function initTreeSitter(dir, log = consoleLogger) {
   );
   return { language: (name2) => languages.get(name2) ?? null };
 }
+function compileQuery(language, source, grammar, log) {
+  if (!language) return null;
+  try {
+    return new Query(language, source);
+  } catch (e) {
+    log.warn(`tree-sitter query for '${grammar}' failed to compile: ${e.message}`);
+    return null;
+  }
+}
 var parsers = /* @__PURE__ */ new WeakMap();
 function withTree(language, source, fn) {
   let parser = parsers.get(language);
@@ -13922,12 +13931,12 @@ function buildGraph(args2) {
   const changedIds = new Set(files.map((f) => f.path));
   const renamedTo = /* @__PURE__ */ new Map();
   const gone = /* @__PURE__ */ new Set();
-  for (const f of files) {
+  for (const f of args2.allChangedFiles ?? files) {
     if (f.status === "deleted") gone.add(f.path);
-    if (f.status === "renamed" && f.oldPath) {
-      renamedTo.set(f.oldPath, f.path);
-      gone.add(f.oldPath);
-    }
+    if (f.status === "renamed" && f.oldPath) gone.add(f.oldPath);
+  }
+  for (const f of files) {
+    if (f.status === "renamed" && f.oldPath) renamedTo.set(f.oldPath, f.path);
   }
   const nodes = /* @__PURE__ */ new Map();
   const clusterInputs = [];
@@ -14000,6 +14009,8 @@ function buildGraph(args2) {
           const target = changedIds.has(p) ? p : deleted ? renamedTo.get(p) ?? p : p;
           if (changedIds.has(target)) {
             addEdge(f.path, target, "changed-changed", imp.kind);
+          } else if (deleted && !args2.headIndex.has(target)) {
+            continue;
           } else {
             addUnchanged(target);
             addEdge(f.path, target, "changed-unchanged", imp.kind);
@@ -14090,7 +14101,7 @@ async function collectImports(args2) {
     } else if (job.index === headIndex) {
       for (const e of entry.imports) {
         if (e.res.kind === "unresolved")
-          e.baseRes = safeResolve(job.parser, e, job.path, baseIndex);
+          e.baseRes = safeResolve(job.parser, e.imp, job.path, baseIndex);
       }
     }
     result.set(job.path, entry);
@@ -14133,22 +14144,23 @@ function parseFile(job, blob) {
   if (blob.length > MAX_PARSE_BYTES) {
     return { language, parseError: "file too large to parse", imports: [] };
   }
+  let raw;
   try {
-    const raw = job.parser.parse(blob.toString("utf8"), job.path);
-    const imports = raw.map((imp) => ({
-      imp,
-      res: job.parser.resolve(imp, job.path, job.index)
-    }));
-    return { language, parseError: null, imports };
+    raw = job.parser.parse(blob.toString("utf8"), job.path);
   } catch (e) {
     return { language, parseError: e.message || "parse failed", imports: [] };
   }
+  const imports = raw.map((imp) => ({
+    imp,
+    res: safeResolve(job.parser, imp, job.path, job.index)
+  }));
+  return { language, parseError: null, imports };
 }
-function safeResolve(parser, e, from, index) {
+function safeResolve(parser, imp, from, index) {
   try {
-    return parser.resolve(e.imp, from, index);
-  } catch {
-    return void 0;
+    return parser.resolve(imp, from, index);
+  } catch (e) {
+    return { kind: "unresolved", reason: `resolver error: ${e.message}` };
   }
 }
 async function forEachBlob(reader, jobs, fn) {
@@ -14296,7 +14308,7 @@ function extract(language, query, source, path) {
 }
 function goParser(rt, log) {
   const language = rt.language("go");
-  const query = language ? new Query(language, QUERY) : null;
+  const query = compileQuery(language, QUERY, "go", log);
   let warned = false;
   return {
     id: "go",
@@ -14397,7 +14409,7 @@ function extract2(language, query, source, path) {
 }
 function pythonParser(rt, log) {
   const language = rt.language("python");
-  const query = language ? new Query(language, QUERY2) : null;
+  const query = compileQuery(language, QUERY2, "python", log);
   let warned = false;
   return {
     id: "python",
@@ -14486,7 +14498,7 @@ function conditionTargets(value, star) {
   if (Array.isArray(value)) return value.flatMap((v) => conditionTargets(v, star));
   if (!isRecord(value)) return [];
   const keys = [
-    ...CONDITIONS.filter((c) => c in value),
+    ...CONDITIONS.filter((c) => Object.hasOwn(value, c)),
     ...Object.keys(value).filter((k) => !CONDITIONS.includes(k))
   ];
   return keys.flatMap((k) => conditionTargets(value[k], star));
@@ -14494,7 +14506,7 @@ function conditionTargets(value, star) {
 function exportTargets(exports, subpath) {
   const isSubpathMap = isRecord(exports) && Object.keys(exports).some((k) => k === "." || k.startsWith("./"));
   if (!isSubpathMap) return subpath === "." ? conditionTargets(exports, null) : null;
-  if (subpath in exports) return conditionTargets(exports[subpath], null);
+  if (Object.hasOwn(exports, subpath)) return conditionTargets(exports[subpath], null);
   let best = null;
   for (const key of Object.keys(exports)) {
     const at = key.indexOf("*");
@@ -14530,7 +14542,7 @@ function resolveWorkspace(repo, pkg, spec) {
   return srcIndex(repo, pkg.dir) ?? resolvePath(repo, pkg.dir);
 }
 function matchPaths(paths, spec) {
-  if (paths[spec]) return { targets: paths[spec], star: "", pattern: spec };
+  if (Object.hasOwn(paths, spec)) return { targets: paths[spec], star: "", pattern: spec };
   let best = null;
   for (const [pattern, targets] of Object.entries(paths)) {
     const at = pattern.indexOf("*");
@@ -14647,7 +14659,8 @@ function typescriptParser(rt, log) {
   const queries = /* @__PURE__ */ new Map();
   for (const name2 of ["typescript", "tsx"]) {
     const language = rt.language(name2);
-    if (language) queries.set(name2, new Query(language, QUERY3));
+    const query = compileQuery(language, QUERY3, name2, log);
+    if (query) queries.set(name2, query);
   }
   let warned = false;
   return {
@@ -34428,20 +34441,24 @@ var schema = external_exports.object({
   top: external_exports.array(external_exports.string().max(MAX_PATH)).max(TOP_FILES),
   headSha: external_exports.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
 }).strict();
+var clamp = (n) => Math.min(Math.max(Math.trunc(n) || 0, 0), MAX_COUNT);
+function fitPath(path) {
+  return path.length <= MAX_PATH ? path : "\u2026" + path.slice(path.length - (MAX_PATH - 1));
+}
 function toCommentSummary(result, minFiles, headSha) {
   const s = result.graph?.summary;
   return {
     version: 1,
     skipped: result.skipped,
-    minFiles,
-    files: s?.files ?? result.filesChanged,
-    additions: s?.additions ?? 0,
-    deletions: s?.deletions ?? 0,
-    edges: s?.edges ?? 0,
-    cycles: s?.cycles ?? 0,
-    unresolved: s?.unresolved ?? 0,
-    parseErrors: s?.parseErrors ?? 0,
-    top: (result.graph?.ranking ?? []).slice(0, TOP_FILES),
+    minFiles: clamp(minFiles),
+    files: clamp(s?.files ?? result.filesChanged),
+    additions: clamp(s?.additions ?? 0),
+    deletions: clamp(s?.deletions ?? 0),
+    edges: clamp(s?.edges ?? 0),
+    cycles: clamp(s?.cycles ?? 0),
+    unresolved: clamp(s?.unresolved ?? 0),
+    parseErrors: clamp(s?.parseErrors ?? 0),
+    top: (result.graph?.ranking ?? []).slice(0, TOP_FILES).map(fitPath),
     headSha
   };
 }
@@ -35570,7 +35587,15 @@ function findWorkspaces(manifests, log, packages = parsePackageJsons(manifests, 
       found2.set(dir, { name: name2, dir, manifest: manifestFields(pkg) });
     }
   };
-  for (const [dir, pkg] of packages) addFrom(dir, packageJsonPatterns(pkg));
+  for (const [dir, pkg] of packages) {
+    try {
+      addFrom(dir, packageJsonPatterns(pkg));
+    } catch {
+      log.warn(
+        `could not expand the workspaces of ${dir ? dir + "/" : ""}package.json; ignoring them`
+      );
+    }
+  }
   for (const [path, text] of manifests) {
     if (baseOf(path) !== "pnpm-workspace.yaml") continue;
     try {
@@ -35760,6 +35785,7 @@ async function runPipeline(opts) {
     const { graph, diffs } = buildGraph({
       pr: { number: opts.prNumber, base, head, mergeBase, repo: opts.repoSlug },
       files,
+      allChangedFiles: raw,
       imports,
       headIndex,
       baseIndex,

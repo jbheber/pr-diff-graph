@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ChangedFile, ChangeStatus } from '../../../src/diff/collect.js';
-import { buildGraph } from '../../../src/graph/build.js';
+import { buildGraph, type BuildGraphArgs } from '../../../src/graph/build.js';
 import type { FileImports, ImportEntry } from '../../../src/graph/types.js';
 import type { RawImport, Resolution } from '../../../src/parsers/types.js';
 import type { RepoIndex } from '../../../src/repo/index.js';
 
-const index = { packageOf: () => null } as unknown as RepoIndex;
+const index = { packageOf: () => null, has: () => true } as unknown as RepoIndex;
 
 function changed(
   path: string,
@@ -38,7 +38,11 @@ function ts(...imports: ImportEntry[]): FileImports {
   return { language: 'typescript', parseError: null, imports };
 }
 
-function build(files: ChangedFile[], imports: Record<string, FileImports>) {
+function build(
+  files: ChangedFile[],
+  imports: Record<string, FileImports>,
+  extra: Partial<BuildGraphArgs> = {},
+) {
   return buildGraph({
     pr: { number: 7, base: 'b', head: 'h', mergeBase: 'm', repo: 'o/r' },
     files,
@@ -47,6 +51,7 @@ function build(files: ChangedFile[], imports: Record<string, FileImports>) {
     baseIndex: index,
     clusterDepth: 2,
     rawFiles: files.length + 1,
+    ...extra,
   });
 }
 
@@ -130,6 +135,42 @@ describe('buildGraph', () => {
       ['src/gone.ts', 'src/new.ts', 'changed-changed'],
     ]);
     expect(graph.nodes.find((n) => n.id === 'src/new.ts')?.oldPath).toBe('src/old.ts');
+  });
+
+  it("deleted and renamed files under excluded paths still give 'target deleted'", () => {
+    const { graph } = build(
+      [changed('src/a.ts')],
+      {
+        'src/a.ts': ts(
+          { imp: imp('./gone', 2), res: notFound, baseRes: file('vendor/gone.ts') },
+          { imp: imp('./old', 3), res: notFound, baseRes: file('vendor/old.ts') },
+        ),
+      },
+      {
+        allChangedFiles: [
+          changed('src/a.ts'),
+          changed('vendor/gone.ts', 'deleted'),
+          changed('vendor/new.ts', 'renamed', { oldPath: 'vendor/old.ts' }),
+        ],
+      },
+    );
+    expect(graph.unresolved.map((u) => u.reason)).toEqual(['target deleted', 'target deleted']);
+  });
+
+  it('a deleted file does not add an unchanged node for a neighbor missing at head', () => {
+    const headIndex = { packageOf: () => null, has: (p: string) => p === 'src/kept.ts' };
+    const { graph } = build(
+      [changed('src/gone.ts', 'deleted')],
+      {
+        'src/gone.ts': ts(
+          { imp: imp('./kept'), res: file('src/kept.ts') },
+          { imp: imp('./other'), res: file('src/other.ts') },
+        ),
+      },
+      { headIndex: headIndex as unknown as RepoIndex },
+    );
+    expect(graph.nodes.map((n) => n.id).sort()).toEqual(['src/gone.ts', 'src/kept.ts']);
+    expect(graph.edges.map((e) => e.to)).toEqual(['src/kept.ts']);
   });
 
   it("import of a deleted path becomes unresolved with reason 'target deleted'", () => {

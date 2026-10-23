@@ -356,3 +356,29 @@ describe('typescript parser: resolve externals', () => {
     for (const r of seen) expect(JSON.stringify(r)).not.toContain('\\\\');
   });
 });
+
+describe('typescript parser: specifiers named like Object.prototype members', () => {
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])(
+    '%s resolves as external, never throws',
+    async (spec) => {
+      const repo = await indexOf({
+        'tsconfig.json': json({ compilerOptions: { paths: { '@/*': ['src/*'] } } }),
+        'package.json': json({ name: 'root' }),
+        'a.ts': '',
+      });
+      expect(() => resolve(repo, 'a.ts', spec)).not.toThrow();
+      expect(resolve(repo, 'a.ts', spec)).toEqual({ kind: 'external', name: spec });
+    },
+  );
+
+  it('a package exports map does not inherit Object.prototype members', async () => {
+    const repo = await indexOf({
+      'package.json': json({ workspaces: ['packages/*'] }),
+      'packages/lib/package.json': json({ name: 'lib', exports: { '.': './index.ts' } }),
+      'packages/lib/index.ts': '',
+      'a.ts': '',
+    });
+    expect(() => resolve(repo, 'a.ts', 'lib/constructor')).not.toThrow();
+    expect(() => resolve(repo, 'a.ts', 'lib/__proto__')).not.toThrow();
+  });
+});
