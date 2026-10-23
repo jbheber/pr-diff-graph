@@ -33,7 +33,7 @@ It is a **portable tool**: it lives in its own repo (`github.com/jbheber/pr-diff
 
 ## Constraints
 
-- JavaScript action, TypeScript source, bundled with `@vercel/ncc` into a committed `dist/`. ESLint + Prettier, strict TypeScript.
+- JavaScript action, TypeScript source, bundled with esbuild (ESM) into a committed `dist/`; @vercel/ncc was dropped because it duplicated the tree-sitter WASM per bundle. ESLint + Prettier, strict TypeScript.
 - Runtime: `node24` (**builder's call, departs from the prompt's `node20`**: Node 20 reached end of life in April 2026 and GitHub runners have moved actions to Node 24; `node20` would ship deprecated).
 - Permissions: `contents: read`, `pull-requests: write` (plus `actions: read` for the comment workflow of the fork pattern).
 - Runner: `ubuntu-latest`; the action must also run locally on Windows/macOS through its CLI (for testing).
@@ -197,7 +197,7 @@ test/
   unit/        parsers, resolvers, cycles, clusters, rank, render escaping
   fixtures/    fixture repos built by a script into temp git repos (base commit + head commit)
   e2e/         runs the CLI pipeline on a fixture, snapshots graph.json
-dist/          ncc output + grammars + report assets (committed)
+dist/          esbuild output + grammars + report assets (committed)
 .github/workflows/  ci.yml (lint, test, check dist is up to date), pr-diff-graph.yml (example, dogfooding)
 README.md
 ```

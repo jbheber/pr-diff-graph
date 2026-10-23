@@ -1,0 +1,25 @@
+name: pr-diff-graph
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-diff-graph-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Dogfooding: `./` runs the committed dist/ of this checkout. On a pull_request from a fork
+      # that is the dist/ of the PR head, which is fine here because the token is read-only and
+      # there are no secrets. In your own repo use `uses: jbheber/pr-diff-graph@v1` instead.
+      - uses: ./
