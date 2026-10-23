@@ -9,18 +9,27 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc --noEmit",
-    "test": "vitest run --project unit",
+    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.client.json",
+    "test": "npm run build:client && vitest run --project unit",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "grammars": "node scripts/fetch-grammars.mjs",
-    "test:perf": "vitest run --project perf"
+    "test:perf": "vitest run --project perf",
+    "build:client": "node scripts/build.mjs client"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.5",
     "@types/picomatch": "^4.0.3",
+    "cytoscape": "^3.34.4",
+    "cytoscape-expand-collapse": "^4.1.1",
+    "cytoscape-fcose": "^2.2.0",
+    "diff2html": "^3.4.56",
+    "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
+    "highlight.js": "^11.12.0",
+    "jsdom": "^29.1.1",
     "prettier": "^3.9.10",
     "tree-sitter-go": "0.25.0",
     "tree-sitter-javascript": "0.25.0",

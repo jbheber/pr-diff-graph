@@ -6,6 +6,7 @@ import { git } from './diff/git.js';
 import { consoleLogger, type Logger } from './log.js';
 import { grammarDir } from './parsers/treesitter.js';
 import { runPipeline } from './pipeline.js';
+import { reportAssetsDir } from './report/render.js';
 
 const USAGE = `Usage: pr-diff-graph --repo <path> --base <ref> --head <ref> [options]
 
@@ -125,7 +126,7 @@ export async function main(argv: string[], log: Logger = consoleLogger): Promise
       repoSlug: null,
       log,
       grammarDir: grammarDir(),
-      assetsDir: '',
+      assetsDir: reportAssetsDir(),
     });
     if (result.skipped) return 0;
     for (const p of [result.reportPath, result.graphPath, result.summaryPath]) {

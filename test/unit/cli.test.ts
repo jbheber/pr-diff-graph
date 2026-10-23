@@ -52,6 +52,7 @@ describe('main', () => {
       );
       expect(code).toBe(0);
       expect(log.mock.calls.map((c) => c[0])).toEqual([
+        join(out, 'report.html'),
         join(out, 'graph.json'),
         join(out, 'summary.json'),
       ]);

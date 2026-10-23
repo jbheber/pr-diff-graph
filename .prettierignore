@@ -5,3 +5,4 @@ coverage
 .superpowers
 package-lock.json
 docs
+src/report/template.html

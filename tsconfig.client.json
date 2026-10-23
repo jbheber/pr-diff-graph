@@ -4,8 +4,8 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": []
+    "types": ["node"]
   },
-  "include": ["src/client/**/*.ts"],
+  "include": ["src/report/client/**/*.ts", "test/unit/report/client.test.ts"],
   "exclude": []
 }

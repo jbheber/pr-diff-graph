@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>{{TITLE}}</title>
+    <style>
+      {{STYLE}}
+    </style>
+  </head>
+  <body>
+    <header id="summary" class="pdg-summary">
+      <h1 id="title" class="pdg-title"></h1>
+      <ul id="totals" class="pdg-totals"></ul>
+      <details id="top" class="pdg-details" open>
+        <summary>Review these first</summary>
+        <ol id="top-list" class="pdg-list"></ol>
+      </details>
+      <details id="cycles" class="pdg-details">
+        <summary>Cycles</summary>
+        <ol id="cycle-list" class="pdg-list"></ol>
+      </details>
+      <details id="unresolved" class="pdg-details">
+        <summary>Unresolved imports</summary>
+        <ul id="unresolved-list" class="pdg-list"></ul>
+      </details>
+    </header>
+
+    <nav id="controls" class="pdg-controls" aria-label="Graph controls">
+      <label class="pdg-search">
+        <span>Search</span>
+        <input id="search" type="search" placeholder="file name" autocomplete="off" />
+      </label>
+      <span id="search-count" class="pdg-muted" aria-live="polite"></span>
+      <fieldset id="status-filter" class="pdg-statuses">
+        <legend>Status</legend>
+        <label><input type="checkbox" name="status" value="added" checked /> added</label>
+        <label><input type="checkbox" name="status" value="modified" checked /> modified</label>
+        <label><input type="checkbox" name="status" value="deleted" checked /> deleted</label>
+        <label><input type="checkbox" name="status" value="renamed" checked /> renamed</label>
+      </fieldset>
+      <label>
+        <span>Directory</span>
+        <select id="cluster-filter">
+          <option value="">all</option>
+        </select>
+      </label>
+      <label><input id="neighbors" type="checkbox" /> show unchanged neighbors</label>
+      <button id="collapse-all" type="button">Collapse all</button>
+      <button id="expand-all" type="button">Expand all</button>
+      <button id="reset-layout" type="button">Reset layout</button>
+    </nav>
+
+    <main class="pdg-main">
+      <div id="graph" class="pdg-graph" aria-label="Import graph of the changed files"></div>
+      <aside id="panel" class="pdg-panel" hidden>
+        <button id="panel-close" type="button" class="pdg-close" aria-label="Close">×</button>
+        <h2 id="panel-path" class="pdg-path"></h2>
+        <p id="panel-old-path" class="pdg-muted"></p>
+        <dl id="panel-meta" class="pdg-meta"></dl>
+        <section>
+          <h3>Imported by (<span id="panel-in-count">0</span>)</h3>
+          <ul id="panel-in" class="pdg-list"></ul>
+        </section>
+        <section>
+          <h3>Imports (<span id="panel-out-count">0</span>)</h3>
+          <ul id="panel-out" class="pdg-list"></ul>
+        </section>
+        <section>
+          <h3>Diff</h3>
+          <div id="panel-diff" class="pdg-diff"></div>
+        </section>
+      </aside>
+    </main>
+
+    <script type="application/json" id="graph-data">{{GRAPH_JSON}}</script>
+    <script type="application/json" id="diff-data">{{DIFFS_JSON}}</script>
+    <script type="application/json" id="options-data">{{OPTIONS_JSON}}</script>
+    <script>
+      {{SCRIPT}}
+    </script>
+  </body>
+</html>

@@ -39,7 +39,7 @@ function options(overrides: Partial<PipelineOptions>): PipelineOptions {
     repoSlug: 'acme/monorepo',
     log: silentLogger,
     grammarDir: grammarDir(),
-    assetsDir: '',
+    assetsDir: join(import.meta.dirname, '../../build/client'),
     ...overrides,
   };
 }
@@ -106,7 +106,13 @@ describe('runPipeline on the monorepo fixture', () => {
     expect(JSON.parse(await readFile(result.summaryPath!, 'utf8'))).toEqual(graph.summary);
   });
 
-  it.todo('writes report.html with no external URLs (src="http / href="http) — Task 8');
+  it('writes report.html with no external URLs', async () => {
+    expect(result.reportPath).toBe(join(out, 'full', 'report.html'));
+    const html = await readFile(result.reportPath!, 'utf8');
+    expect(html).toContain('<script type="application/json" id="graph-data">');
+    expect(html).not.toMatch(/(src|href)\s*=\s*["']?https?:/i);
+    expect(html).not.toMatch(/url\(\s*["']?https?:/i);
+  });
 });
 
 describe('runPipeline thresholds', () => {

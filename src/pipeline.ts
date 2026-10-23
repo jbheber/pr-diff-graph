@@ -11,6 +11,7 @@ import type { Logger } from './log.js';
 import { createRegistry } from './parsers/registry.js';
 import { initTreeSitter } from './parsers/treesitter.js';
 import { buildRepoIndex } from './repo/index.js';
+import { loadReportAssets, renderReport } from './report/render.js';
 
 export interface PipelineOptions {
   /** Path of the git repository to analyse. */
@@ -32,7 +33,7 @@ export interface PipelineOptions {
   log: Logger;
   /** Directory holding tree-sitter.wasm and the grammar WASMs. */
   grammarDir: string;
-  /** Report client assets (used by the report renderer). */
+  /** Directory holding the report template and client bundle (see `loadReportAssets`). */
   assetsDir: string;
 }
 
@@ -86,8 +87,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       scanRepo: opts.scanRepo,
       log,
     });
-    // `diffs` goes to the report renderer (Task 8).
-    const { graph } = buildGraph({
+    const { graph, diffs } = buildGraph({
       pr: { number: opts.prNumber, base, head, mergeBase, repo: opts.repoSlug },
       files,
       imports,
@@ -97,9 +97,14 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       rawFiles: raw.length,
     });
 
+    const assets = await loadReportAssets(opts.assetsDir);
+    const html = renderReport(graph, diffs, { collapseThreshold: opts.collapseThreshold }, assets);
+
     await mkdir(opts.outDir, { recursive: true });
+    const reportPath = join(opts.outDir, 'report.html');
     const graphPath = join(opts.outDir, 'graph.json');
     const summaryPath = join(opts.outDir, 'summary.json');
+    await writeFile(reportPath, html);
     await writeFile(graphPath, JSON.stringify(graph, null, 2) + '\n');
     await writeFile(summaryPath, JSON.stringify(graph.summary, null, 2) + '\n');
     log.info(
@@ -111,7 +116,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       filesChanged: files.length,
       rawFilesChanged: raw.length,
       graph,
-      reportPath: null,
+      reportPath,
       graphPath,
       summaryPath,
     };
