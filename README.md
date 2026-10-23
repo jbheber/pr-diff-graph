@@ -38,7 +38,16 @@ jobs:
       - uses: jbheber/pr-diff-graph@v1
 ```
 
-On a PR with more than 50 changed files the action comments with the totals, cycles, unresolved imports and the top files to review first, and links the `pr-diff-graph` artifact. Download it and open `report.html`. A PR with `min-files` (default 50) changed files or fewer is skipped: no report and no new comment, but if a sticky comment already exists (the PR shrank) it is updated to say the PR was skipped.
+On a PR with more than 50 changed files the action comments with the totals, cycles, unresolved imports and the top files to review first, and links the `pr-diff-graph` artifact. Download it and open `report.html`.
+
+The comment (and the job summary) also carries two collapsible Mermaid graphs, which GitHub renders in place:
+
+- **Overview**: one box per changed directory (`<path> · <n> files`, at most 12, splitting the busiest directories while there is room) and one arrow per pair of directories, labelled with the number of imports between their changed files. Arrows that carry an import cycle are red.
+- **Focus**: the 10 most connected changed files plus the files in cycles (at most 25), coloured by status (added, modified, deleted, renamed), with the imports among them. Cycle edges are red.
+
+A graph with nothing to show is left out. The interactive report remains the place for detail.
+
+A PR with `min-files` (default 50) changed files or fewer is skipped: no report and no new comment, but if a sticky comment already exists (the PR shrank) it is updated to say the PR was skipped.
 
 `fetch-depth: 0` is recommended. With a shallow checkout the action fetches the base and deepens until it finds the merge base, and warns.
 
@@ -103,6 +112,7 @@ Mode `comment` treats everything from the triggering run as hostile and binds th
 - The PR number comes from the `workflow_run` event (its `pull_requests` list, or a lookup of the open PR with the run's head SHA, repo and branch), never from the file.
 - The PR must be open, target this repo, and its current head SHA must equal the run's head SHA (checked again with the API before commenting).
 - `summary.json` is validated against a schema, its numbers and paths are length-capped and escaped into the comment, and its `headSha` must equal the triggering run's head SHA.
+- The comment's graphs are generated from schema-validated structured data (capped lists, in-range indexes, known statuses, labels reduced to a safe character set), never from Mermaid or other text in `summary.json`.
 
 If the checks fail or more than one PR matches, the action warns and does not comment.
 

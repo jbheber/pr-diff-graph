@@ -33,6 +33,10 @@ const graph = {
     externals: 0,
   },
   ranking: ['src/a.ts'],
+  clusters: [],
+  nodes: [],
+  edges: [],
+  cycles: [],
 } as unknown as GraphJson;
 
 const okResult: PipelineResult = {

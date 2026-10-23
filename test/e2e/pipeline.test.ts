@@ -7,7 +7,8 @@ import type { GraphJson } from '../../src/graph/types.js';
 import { silentLogger } from '../../src/log.js';
 import { grammarDir } from '../../src/parsers/treesitter.js';
 import { runPipeline, type PipelineOptions, type PipelineResult } from '../../src/pipeline.js';
-import { toCommentSummary } from '../../src/publish/summary.js';
+import { buildCommentBody } from '../../src/publish/comment.js';
+import { parseSummaryJson, toCommentSummary } from '../../src/publish/summary.js';
 import { makeMonorepo, type MonorepoFixture } from './fixture.js';
 
 let fx: MonorepoFixture;
@@ -107,6 +108,16 @@ describe('runPipeline on the monorepo fixture', () => {
     expect(JSON.parse(await readFile(result.summaryPath!, 'utf8'))).toEqual(
       toCommentSummary(result, 0, graph.pr.head),
     );
+  });
+
+  it('summary.json graphs round-trip through the strict schema and render', () => {
+    const s = toCommentSummary(result, 0, graph.pr.head);
+    expect(s.graphs).toBeDefined();
+    expect(s.graphs!.edges.some((e) => e.cycle)).toBe(true);
+    expect(parseSummaryJson(JSON.stringify(s))).toEqual(s);
+    const body = buildCommentBody(s, { artifactUrl: null, runUrl: 'https://example.test/run' });
+    expect(body).toContain('```mermaid');
+    expect(body).toContain('stroke:#d1242f');
   });
 
   it('writes report.html with no external URLs', async () => {

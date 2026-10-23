@@ -51,6 +51,10 @@ describe('toCommentSummary', () => {
         externals: 4,
       },
       ranking: ['a', 'b', 'c', 'd', 'e', 'f'],
+      clusters: [],
+      nodes: [],
+      edges: [],
+      cycles: [],
     } as unknown as GraphJson;
     expect(toCommentSummary(result({ filesChanged: 60, graph }), 50, 'abc')).toEqual({
       version: 1,
@@ -81,6 +85,10 @@ describe('toCommentSummary', () => {
         parseErrors: 99_999_999,
       },
       ranking: [long, 'short.ts'],
+      clusters: [],
+      nodes: [],
+      edges: [],
+      cycles: [],
     } as unknown as GraphJson;
     const s = toCommentSummary(result({ filesChanged: 5, graph }), 50, 'a'.repeat(40));
     const back = parseSummaryJson(JSON.stringify(s));
@@ -89,6 +97,49 @@ describe('toCommentSummary', () => {
     expect(back.top[0]!.endsWith('file.ts')).toBe(true);
     expect(back.top[1]).toBe('short.ts');
     expect(back.files).toBe(10_000_000);
+  });
+
+  it('adds graphs, clamping long labels and paths so the result still parses', () => {
+    const long = 'd/'.repeat(300) + 'file.ts';
+    const graph = {
+      summary: { files: 3, additions: 0, deletions: 0, edges: 2 },
+      clusters: [
+        { id: 'c:a', label: 'a', parent: null },
+        { id: `c:${long}`, label: long, parent: null },
+      ],
+      nodes: [
+        { id: 'a/x.ts', path: 'a/x.ts', cluster: 'c:a', changed: true, status: 'added' },
+        { id: 'a/y.ts', path: 'a/y.ts', cluster: 'c:a', changed: true, status: 'modified' },
+        {
+          id: `${long}/z.ts`,
+          path: `${long}/z.ts`,
+          cluster: `c:${long}`,
+          changed: true,
+          status: 'deleted',
+        },
+      ],
+      edges: [
+        {
+          from: 'a/x.ts',
+          to: `${long}/z.ts`,
+          kind: 'changed-changed',
+          importKinds: [],
+          inCycle: false,
+        },
+        { from: 'a/x.ts', to: 'a/y.ts', kind: 'changed-changed', importKinds: [], inCycle: false },
+      ],
+      cycles: [],
+      ranking: ['a/x.ts', 'a/y.ts', `${long}/z.ts`],
+    } as unknown as GraphJson;
+    const s = toCommentSummary(result({ filesChanged: 3, graph }), 0, 'a'.repeat(40));
+    expect(s.graphs?.boxes).toHaveLength(2);
+    expect(s.graphs?.nodes).toHaveLength(3);
+    expect(parseSummaryJson(JSON.stringify(s))).toEqual(s);
+  });
+
+  it('leaves graphs out when there is nothing to draw', () => {
+    const s = toCommentSummary(result({ skipped: true, filesChanged: 7 }), 50, 'abc');
+    expect('graphs' in s).toBe(false);
   });
 
   it('skipped result: file count only', () => {
@@ -114,5 +165,60 @@ describe('parseSummaryJson', () => {
     expect(() => parseSummaryJson(bad({ headSha: 'not a sha' }))).toThrow();
     expect(() => parseSummaryJson('{not json')).toThrow(/summary\.json/);
     expect(() => parseSummaryJson('null')).toThrow(/summary\.json/);
+  });
+});
+
+describe('parseSummaryJson: graphs', () => {
+  const graphs = {
+    boxes: [
+      { label: 'src/a', files: 2 },
+      { label: 'src/b', files: 1 },
+    ],
+    arrows: [{ from: 0, to: 1, count: 3, cycle: true }],
+    nodes: [
+      { path: 'src/a/x.ts', status: 'added' },
+      { path: 'src/b/y.ts', status: 'renamed' },
+    ],
+    edges: [{ from: 0, to: 1, cycle: false }],
+  };
+  const withGraphs = (g: unknown) => JSON.stringify({ ...valid, graphs: g });
+
+  it('accepts valid graphs, and a summary without graphs', () => {
+    expect(parseSummaryJson(withGraphs(graphs)).graphs).toEqual(graphs);
+    expect(parseSummaryJson(JSON.stringify(valid)).graphs).toBeUndefined();
+  });
+
+  it('rejects out-of-range indexes', () => {
+    const arrow = (a: object) => withGraphs({ ...graphs, arrows: [{ ...graphs.arrows[0], ...a }] });
+    expect(() => parseSummaryJson(arrow({ to: 2 }))).toThrow(/graphs\.arrows\.0\.to/);
+    expect(() => parseSummaryJson(arrow({ from: -1 }))).toThrow();
+    expect(() => parseSummaryJson(arrow({ from: 0.5 }))).toThrow();
+    const edge = withGraphs({ ...graphs, edges: [{ from: 0, to: 2, cycle: false }] });
+    expect(() => parseSummaryJson(edge)).toThrow(/graphs\.edges\.0\.to/);
+  });
+
+  it('rejects too many items', () => {
+    const boxes = Array.from({ length: 13 }, (_, i) => ({ label: `d${i}`, files: 1 }));
+    expect(() => parseSummaryJson(withGraphs({ ...graphs, boxes }))).toThrow();
+    const nodes = Array.from({ length: 26 }, (_, i) => ({ path: `f${i}`, status: 'added' }));
+    expect(() => parseSummaryJson(withGraphs({ ...graphs, nodes }))).toThrow();
+    const arrows = Array.from({ length: 31 }, () => graphs.arrows[0]);
+    expect(() => parseSummaryJson(withGraphs({ ...graphs, arrows }))).toThrow();
+    const edges = Array.from({ length: 61 }, () => graphs.edges[0]);
+    expect(() => parseSummaryJson(withGraphs({ ...graphs, edges }))).toThrow();
+  });
+
+  it('rejects a bad status, long labels, bad counts and extra keys', () => {
+    const node = (n: object) => withGraphs({ ...graphs, nodes: [{ ...graphs.nodes[0], ...n }] });
+    expect(() => parseSummaryJson(node({ status: 'unchanged' }))).toThrow();
+    expect(() => parseSummaryJson(node({ path: 'x'.repeat(301) }))).toThrow();
+    expect(() => parseSummaryJson(node({ id: 'f0' }))).toThrow();
+    const box = (b: object) =>
+      withGraphs({ ...graphs, boxes: [{ ...graphs.boxes[0], ...b }, graphs.boxes[1]] });
+    expect(() => parseSummaryJson(box({ label: 'x'.repeat(301) }))).toThrow();
+    expect(() => parseSummaryJson(box({ files: 10_000_001 }))).toThrow();
+    expect(() => parseSummaryJson(box({ mermaid: 'graph TD' }))).toThrow();
+    expect(() => parseSummaryJson(withGraphs({ ...graphs, mermaid: 'x' }))).toThrow();
+    expect(() => parseSummaryJson(withGraphs('flowchart LR'))).toThrow();
   });
 });

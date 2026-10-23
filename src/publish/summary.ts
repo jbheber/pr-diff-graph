@@ -2,6 +2,14 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { PipelineResult } from '../pipeline.js';
+import {
+  buildCommentGraphs,
+  MAX_ARROWS,
+  MAX_BOXES,
+  MAX_EDGES,
+  MAX_NODES,
+  type CommentGraphs,
+} from './graphs.js';
 
 /**
  * What the sticky comment and job summary show. Written as `summary.json` into the artifact;
@@ -22,6 +30,8 @@ export interface CommentSummary {
   /** The highest-ranked changed files, at most 5. */
   top: string[];
   headSha: string;
+  /** Structured data for the comment's Mermaid graphs; absent when there is nothing to draw. */
+  graphs?: CommentGraphs;
 }
 
 export const TOP_FILES = 5;
@@ -29,6 +39,48 @@ const MAX_COUNT = 10_000_000;
 const MAX_PATH = 300;
 
 const count = z.number().int().min(0).max(MAX_COUNT);
+const index = z.number().int().min(0);
+
+/** Every index must point inside its list; checked after the shapes. */
+const graphs = z
+  .object({
+    boxes: z
+      .array(z.object({ label: z.string().max(MAX_PATH), files: count }).strict())
+      .max(MAX_BOXES),
+    arrows: z
+      .array(z.object({ from: index, to: index, count, cycle: z.boolean() }).strict())
+      .max(MAX_ARROWS),
+    nodes: z
+      .array(
+        z
+          .object({
+            path: z.string().max(MAX_PATH),
+            status: z.enum(['added', 'modified', 'deleted', 'renamed']),
+          })
+          .strict(),
+      )
+      .max(MAX_NODES),
+    edges: z
+      .array(z.object({ from: index, to: index, cycle: z.boolean() }).strict())
+      .max(MAX_EDGES),
+  })
+  .strict()
+  .superRefine((g, ctx) => {
+    const check = (list: 'arrows' | 'edges', size: number) =>
+      g[list].forEach((x, i) => {
+        for (const end of ['from', 'to'] as const) {
+          if (x[end] >= size) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [list, i, end],
+              message: `index ${x[end]} is out of range`,
+            });
+          }
+        }
+      });
+    check('arrows', g.boxes.length);
+    check('edges', g.nodes.length);
+  });
 
 const schema = z
   .object({
@@ -44,6 +96,7 @@ const schema = z
     parseErrors: count,
     top: z.array(z.string().max(MAX_PATH)).max(TOP_FILES),
     headSha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+    graphs: graphs.optional(),
   })
   .strict();
 
@@ -61,7 +114,8 @@ export function toCommentSummary(
   headSha: string,
 ): CommentSummary {
   const s = result.graph?.summary;
-  return {
+  const g = result.graph ? buildCommentGraphs(result.graph) : null;
+  const summary: CommentSummary = {
     version: 1,
     skipped: result.skipped,
     minFiles: clamp(minFiles),
@@ -75,6 +129,15 @@ export function toCommentSummary(
     top: (result.graph?.ranking ?? []).slice(0, TOP_FILES).map(fitPath),
     headSha,
   };
+  if (g) {
+    summary.graphs = {
+      boxes: g.boxes.map((b) => ({ label: fitPath(b.label), files: clamp(b.files) })),
+      arrows: g.arrows.map((a) => ({ ...a, count: clamp(a.count) })),
+      nodes: g.nodes.map((n) => ({ path: fitPath(n.path), status: n.status })),
+      edges: g.edges,
+    };
+  }
+  return summary;
 }
 
 /** Parses and validates untrusted `summary.json` text; throws on anything off-schema. */

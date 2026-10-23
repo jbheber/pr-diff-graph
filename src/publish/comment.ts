@@ -1,3 +1,4 @@
+import { renderGraphSections } from './graphs.js';
 import type { CommentSummary } from './summary.js';
 
 /** Hidden marker identifying the action's sticky comment. */
@@ -62,12 +63,20 @@ export function codePath(path: string): string {
 
 const n = (x: number) => x.toLocaleString('en-US');
 
+/** `one` for exactly 1, else `many` (0 files, 1 file, 2 files). */
+export function plural(x: number, one: string, many = `${one}s`): string {
+  return x === 1 ? one : many;
+}
+
+/** A bold count and its noun: `**1** cycle`, `**2** cycles`. */
+const total = (x: number, one: string) => `**${n(x)}** ${plural(x, one)}`;
+
 /** The comment and job-summary markdown, without the marker. */
 export function buildSummaryMarkdown(s: CommentSummary, links: Links): string {
   const lines = ['### PR diff graph', ''];
   if (s.skipped) {
     lines.push(
-      `This PR has ${n(s.files)} changed files, at or under the \`min-files\` threshold ` +
+      `This PR has ${n(s.files)} changed ${plural(s.files, 'file')}, at or under the \`min-files\` threshold ` +
         `(${n(s.minFiles)}), so no report was built.`,
       '',
       `[Workflow run](${links.runUrl})`,
@@ -75,14 +84,17 @@ export function buildSummaryMarkdown(s: CommentSummary, links: Links): string {
     return lines.join('\n') + '\n';
   }
   lines.push(
-    `**${n(s.files)}** changed files (+${n(s.additions)} / −${n(s.deletions)}) · ` +
-      `**${n(s.edges)}** import edges · **${n(s.cycles)}** cycles · ` +
-      `**${n(s.unresolved)}** unresolved imports · **${n(s.parseErrors)}** parse errors`,
+    `${total(s.files, 'changed file')} (+${n(s.additions)} / −${n(s.deletions)}) · ` +
+      `${total(s.edges, 'import edge')} · ${total(s.cycles, 'cycle')} · ` +
+      `${total(s.unresolved, 'unresolved import')} · ${total(s.parseErrors, 'parse error')}`,
   );
   if (s.top.length > 0) {
     lines.push('', '**Most connected changed files**', '');
     s.top.forEach((p, i) => lines.push(`${i + 1}. ${codePath(p)}`));
   }
+  // Generated from the schema-checked structure, never from text in summary.json.
+  const graphs = s.graphs ? renderGraphSections(s.graphs) : '';
+  if (graphs) lines.push('', graphs);
   lines.push('');
   lines.push(
     links.artifactUrl

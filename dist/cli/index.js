@@ -484,7 +484,7 @@ var require_scan = __commonJS({
       const tokens = [];
       const parts2 = [];
       let str = input2;
-      let index = -1;
+      let index2 = -1;
       let start2 = 0;
       let lastIndex = 0;
       let isBrace = false;
@@ -501,13 +501,13 @@ var require_scan = __commonJS({
       let prev;
       let code;
       let token = { value: "", depth: 0, isGlob: false };
-      const eos = () => index >= length;
-      const peek = () => str.charCodeAt(index + 1);
+      const eos = () => index2 >= length;
+      const peek = () => str.charCodeAt(index2 + 1);
       const advance = () => {
         prev = code;
-        return str.charCodeAt(++index);
+        return str.charCodeAt(++index2);
       };
-      while (index < length) {
+      while (index2 < length) {
         code = advance();
         let next;
         if (code === CHAR_BACKWARD_SLASH) {
@@ -564,15 +564,15 @@ var require_scan = __commonJS({
           break;
         }
         if (code === CHAR_FORWARD_SLASH) {
-          slashes.push(index);
+          slashes.push(index2);
           tokens.push(token);
           token = { value: "", depth: 0, isGlob: false };
           if (finished === true) continue;
-          if (prev === CHAR_DOT && index === start2 + 1) {
+          if (prev === CHAR_DOT && index2 === start2 + 1) {
             start2 += 2;
             continue;
           }
-          lastIndex = index + 1;
+          lastIndex = index2 + 1;
           continue;
         }
         if (opts.noext !== true) {
@@ -581,7 +581,7 @@ var require_scan = __commonJS({
             isGlob = token.isGlob = true;
             isExtglob = token.isExtglob = true;
             finished = true;
-            if (code === CHAR_EXCLAMATION_MARK && index === start2) {
+            if (code === CHAR_EXCLAMATION_MARK && index2 === start2) {
               negatedExtglob = true;
             }
             if (scanToEnd === true) {
@@ -642,7 +642,7 @@ var require_scan = __commonJS({
           }
           break;
         }
-        if (opts.nonegate !== true && code === CHAR_EXCLAMATION_MARK && index === start2) {
+        if (opts.nonegate !== true && code === CHAR_EXCLAMATION_MARK && index2 === start2) {
           negated = token.negated = true;
           start2++;
           continue;
@@ -952,10 +952,10 @@ var require_parse = __commonJS({
       return `${source}*`;
     };
     var getStarExtglobSequenceChars = (pattern) => {
-      let index = 0;
+      let index2 = 0;
       const chars = [];
-      while (index < pattern.length) {
-        const match = parseRepeatedExtglob(pattern.slice(index), false);
+      while (index2 < pattern.length) {
+        const match = parseRepeatedExtglob(pattern.slice(index2), false);
         if (!match || match.type !== "*") {
           return;
         }
@@ -968,7 +968,7 @@ var require_parse = __commonJS({
           return;
         }
         chars.push(branch);
-        index += match.end + 1;
+        index2 += match.end + 1;
       }
       if (chars.length < 1) {
         return;
@@ -1204,7 +1204,7 @@ var require_parse = __commonJS({
       };
       if (opts.fastpaths !== false && !/(^[*!]|[/()[\]{}"])/.test(input2)) {
         let backslashes = false;
-        let output2 = input2.replace(REGEX_SPECIAL_CHARS_BACKREF, (m, esc2, chars, first, rest, index) => {
+        let output2 = input2.replace(REGEX_SPECIAL_CHARS_BACKREF, (m, esc2, chars, first, rest, index2) => {
           if (first === "\\") {
             backslashes = true;
             return m;
@@ -1213,7 +1213,7 @@ var require_parse = __commonJS({
             if (esc2) {
               return esc2 + first + (rest ? QMARK.repeat(rest.length) : "");
             }
-            if (index === 0) {
+            if (index2 === 0) {
               return qmarkNoDot + (rest ? QMARK.repeat(rest.length) : "");
             }
             return QMARK.repeat(chars.length);
@@ -7481,10 +7481,10 @@ var require_cst_visit = __commonJS({
     visit3.REMOVE = REMOVE;
     visit3.itemAtPath = (cst, path) => {
       let item = cst;
-      for (const [field, index] of path) {
+      for (const [field, index2] of path) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
-          item = tok.items[index];
+          item = tok.items[index2];
         } else
           return void 0;
       }
@@ -9475,15 +9475,15 @@ var Edit = class {
    * based on an edit operation. This is useful for editing points without
    * requiring a tree or node instance.
    */
-  editPoint(point, index) {
-    let newIndex = index;
+  editPoint(point, index2) {
+    let newIndex = index2;
     const newPoint = { ...point };
-    if (index >= this.oldEndIndex) {
-      newIndex = this.newEndIndex + (index - this.oldEndIndex);
+    if (index2 >= this.oldEndIndex) {
+      newIndex = this.newEndIndex + (index2 - this.oldEndIndex);
       const originalRow = point.row;
       newPoint.row = this.newEndPosition.row + (point.row - this.oldEndPosition.row);
       newPoint.column = originalRow === this.oldEndPosition.row ? this.newEndPosition.column + (point.column - this.oldEndPosition.column) : point.column;
-    } else if (index > this.startIndex) {
+    } else if (index2 > this.startIndex) {
       newIndex = this.newEndIndex;
       newPoint.row = this.newEndPosition.row;
       newPoint.column = this.newEndPosition.column;
@@ -10237,9 +10237,9 @@ var Node = class {
    * you might be iterating over a long list of children, you should use
    * {@link Node#children} instead.
    */
-  child(index) {
+  child(index2) {
     marshalNode(this);
-    C._ts_node_child_wasm(this.tree[0], index);
+    C._ts_node_child_wasm(this.tree[0], index2);
     return unmarshalNode(this.tree);
   }
   /**
@@ -10250,9 +10250,9 @@ var Node = class {
    * you might be iterating over a long list of children, you should use
    * {@link Node#namedChildren} instead.
    */
-  namedChild(index) {
+  namedChild(index2) {
     marshalNode(this);
-    C._ts_node_named_child_wasm(this.tree[0], index);
+    C._ts_node_named_child_wasm(this.tree[0], index2);
     return unmarshalNode(this.tree);
   }
   /**
@@ -10278,16 +10278,16 @@ var Node = class {
     return null;
   }
   /** Get the field name of this node's child at the given index. */
-  fieldNameForChild(index) {
+  fieldNameForChild(index2) {
     marshalNode(this);
-    const address = C._ts_node_field_name_for_child_wasm(this.tree[0], index);
+    const address = C._ts_node_field_name_for_child_wasm(this.tree[0], index2);
     if (!address) return null;
     return C.AsciiToString(address);
   }
   /** Get the field name of this node's named child at the given index. */
-  fieldNameForNamedChild(index) {
+  fieldNameForNamedChild(index2) {
     marshalNode(this);
-    const address = C._ts_node_field_name_for_named_child_wasm(this.tree[0], index);
+    const address = C._ts_node_field_name_for_named_child_wasm(this.tree[0], index2);
     if (!address) return null;
     return C.AsciiToString(address);
   }
@@ -10323,18 +10323,18 @@ var Node = class {
     return result;
   }
   /** Get the node's first child that contains or starts after the given byte offset. */
-  firstChildForIndex(index) {
+  firstChildForIndex(index2) {
     marshalNode(this);
     const address = TRANSFER_BUFFER + SIZE_OF_NODE;
-    C.setValue(address, index, "i32");
+    C.setValue(address, index2, "i32");
     C._ts_node_first_child_for_byte_wasm(this.tree[0]);
     return unmarshalNode(this.tree);
   }
   /** Get the node's first named child that contains or starts after the given byte offset. */
-  firstNamedChildForIndex(index) {
+  firstNamedChildForIndex(index2) {
     marshalNode(this);
     const address = TRANSFER_BUFFER + SIZE_OF_NODE;
-    C.setValue(address, index, "i32");
+    C.setValue(address, index2, "i32");
     C._ts_node_first_named_child_for_byte_wasm(this.tree[0]);
     return unmarshalNode(this.tree);
   }
@@ -10644,8 +10644,8 @@ function unmarshalCaptures(query, tree, address, patternIndex, result) {
   return address;
 }
 __name(unmarshalCaptures, "unmarshalCaptures");
-function marshalNode(node2, index = 0) {
-  let address = TRANSFER_BUFFER + index * SIZE_OF_NODE;
+function marshalNode(node2, index2 = 0) {
+  let address = TRANSFER_BUFFER + index2 * SIZE_OF_NODE;
   C.setValue(address, node2.id, "i32");
   address += SIZE_OF_INT;
   C.setValue(address, node2.startIndex, "i32");
@@ -10661,7 +10661,7 @@ function unmarshalNode(tree, address = TRANSFER_BUFFER) {
   const id = C.getValue(address, "i32");
   address += SIZE_OF_INT;
   if (id === 0) return null;
-  const index = C.getValue(address, "i32");
+  const index2 = C.getValue(address, "i32");
   address += SIZE_OF_INT;
   const row = C.getValue(address, "i32");
   address += SIZE_OF_INT;
@@ -10671,7 +10671,7 @@ function unmarshalNode(tree, address = TRANSFER_BUFFER) {
   const result = new Node(INTERNAL, {
     id,
     tree,
-    startIndex: index,
+    startIndex: index2,
     startPosition: { row, column },
     other
   });
@@ -12168,9 +12168,9 @@ async function Module2(moduleArg = {}) {
     }
   }
   __name(_tree_sitter_log_callback, "_tree_sitter_log_callback");
-  function _tree_sitter_parse_callback(inputBufferAddress, index, row, column, lengthAddress) {
+  function _tree_sitter_parse_callback(inputBufferAddress, index2, row, column, lengthAddress) {
     const INPUT_BUFFER_SIZE = 10 * 1024;
-    const string4 = Module.currentParseCallback(index, {
+    const string4 = Module.currentParseCallback(index2, {
       row,
       column
     });
@@ -12722,7 +12722,7 @@ var Parser = class {
    */
   parse(callback, oldTree, options) {
     if (typeof callback === "string") {
-      C.currentParseCallback = (index) => callback.slice(index);
+      C.currentParseCallback = (index2) => callback.slice(index2);
     } else if (typeof callback === "function") {
       C.currentParseCallback = callback;
     } else {
@@ -12837,11 +12837,11 @@ var QueryErrorKind = {
   PatternStructure: 5
 };
 var QueryError = class _QueryError extends Error {
-  constructor(kind, info2, index, length) {
+  constructor(kind, info2, index2, length) {
     super(_QueryError.formatMessage(kind, info2));
     this.kind = kind;
     this.info = info2;
-    this.index = index;
+    this.index = index2;
     this.length = length;
     this.name = "QueryError";
   }
@@ -12868,7 +12868,7 @@ var QueryError = class _QueryError extends Error {
     }
   }
 };
-function parseAnyPredicate(steps, index, operator, textPredicates) {
+function parseAnyPredicate(steps, index2, operator, textPredicates) {
   if (steps.length !== 3) {
     throw new Error(
       `Wrong number of arguments to \`#${operator}\` predicate. Expected 2, got ${steps.length - 1}`
@@ -12884,24 +12884,24 @@ function parseAnyPredicate(steps, index, operator, textPredicates) {
   if (isCaptureStep(steps[2])) {
     const captureName1 = steps[1].name;
     const captureName2 = steps[2].name;
-    textPredicates[index].push((captures) => {
+    textPredicates[index2].push((captures) => {
       const nodes1 = [];
       const nodes2 = [];
       for (const c of captures) {
         if (c.name === captureName1) nodes1.push(c.node);
         if (c.name === captureName2) nodes2.push(c.node);
       }
-      const compare4 = /* @__PURE__ */ __name((n1, n2, positive) => {
+      const compare5 = /* @__PURE__ */ __name((n1, n2, positive) => {
         return positive ? n1.text === n2.text : n1.text !== n2.text;
       }, "compare");
-      return matchAll ? nodes1.every((n1) => nodes2.some((n2) => compare4(n1, n2, isPositive))) : nodes1.some((n1) => nodes2.some((n2) => compare4(n1, n2, isPositive)));
+      return matchAll ? nodes1.every((n1) => nodes2.some((n2) => compare5(n1, n2, isPositive))) : nodes1.some((n1) => nodes2.some((n2) => compare5(n1, n2, isPositive)));
     });
   } else {
     const captureName = steps[1].name;
     const stringValue = steps[2].value;
     const matches = /* @__PURE__ */ __name((n) => n.text === stringValue, "matches");
     const doesNotMatch = /* @__PURE__ */ __name((n) => n.text !== stringValue, "doesNotMatch");
-    textPredicates[index].push((captures) => {
+    textPredicates[index2].push((captures) => {
       const nodes = [];
       for (const c of captures) {
         if (c.name === captureName) nodes.push(c.node);
@@ -12912,7 +12912,7 @@ function parseAnyPredicate(steps, index, operator, textPredicates) {
   }
 }
 __name(parseAnyPredicate, "parseAnyPredicate");
-function parseMatchPredicate(steps, index, operator, textPredicates) {
+function parseMatchPredicate(steps, index2, operator, textPredicates) {
   if (steps.length !== 3) {
     throw new Error(
       `Wrong number of arguments to \`#${operator}\` predicate. Expected 2, got ${steps.length - 1}.`
@@ -12932,7 +12932,7 @@ function parseMatchPredicate(steps, index, operator, textPredicates) {
   const matchAll = !operator.startsWith("any-");
   const captureName = steps[1].name;
   const regex = new RegExp(steps[2].value);
-  textPredicates[index].push((captures) => {
+  textPredicates[index2].push((captures) => {
     const nodes = [];
     for (const c of captures) {
       if (c.name === captureName) nodes.push(c.node.text);
@@ -12945,7 +12945,7 @@ function parseMatchPredicate(steps, index, operator, textPredicates) {
   });
 }
 __name(parseMatchPredicate, "parseMatchPredicate");
-function parseAnyOfPredicate(steps, index, operator, textPredicates) {
+function parseAnyOfPredicate(steps, index2, operator, textPredicates) {
   if (steps.length < 2) {
     throw new Error(
       `Wrong number of arguments to \`#${operator}\` predicate. Expected at least 1. Got ${steps.length - 1}.`
@@ -12965,7 +12965,7 @@ function parseAnyOfPredicate(steps, index, operator, textPredicates) {
     );
   }
   const values = stringSteps.map((s) => s.value);
-  textPredicates[index].push((captures) => {
+  textPredicates[index2].push((captures) => {
     const nodes = [];
     for (const c of captures) {
       if (c.name === captureName) nodes.push(c.node.text);
@@ -12975,7 +12975,7 @@ function parseAnyOfPredicate(steps, index, operator, textPredicates) {
   });
 }
 __name(parseAnyOfPredicate, "parseAnyOfPredicate");
-function parseIsPredicate(steps, index, operator, assertedProperties, refutedProperties) {
+function parseIsPredicate(steps, index2, operator, assertedProperties, refutedProperties) {
   if (steps.length < 2 || steps.length > 3) {
     throw new Error(
       `Wrong number of arguments to \`#${operator}\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`
@@ -12987,22 +12987,22 @@ function parseIsPredicate(steps, index, operator, assertedProperties, refutedPro
     );
   }
   const properties = operator === "is?" ? assertedProperties : refutedProperties;
-  if (!properties[index]) properties[index] = {};
-  properties[index][steps[1].value] = steps[2]?.value ?? null;
+  if (!properties[index2]) properties[index2] = {};
+  properties[index2][steps[1].value] = steps[2]?.value ?? null;
 }
 __name(parseIsPredicate, "parseIsPredicate");
-function parseSetDirective(steps, index, setProperties) {
+function parseSetDirective(steps, index2, setProperties) {
   if (steps.length < 2 || steps.length > 3) {
     throw new Error(`Wrong number of arguments to \`#set!\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`);
   }
   if (!steps.every(isStringStep)) {
     throw new Error(`Arguments to \`#set!\` predicate must be strings.".`);
   }
-  if (!setProperties[index]) setProperties[index] = {};
-  setProperties[index][steps[1].value] = steps[2]?.value ?? null;
+  if (!setProperties[index2]) setProperties[index2] = {};
+  setProperties[index2][steps[1].value] = steps[2]?.value ?? null;
 }
 __name(parseSetDirective, "parseSetDirective");
-function parsePattern(index, stepType, stepValueId, captureNames, stringValues, steps, textPredicates, predicates, setProperties, assertedProperties, refutedProperties) {
+function parsePattern(index2, stepType, stepValueId, captureNames, stringValues, steps, textPredicates, predicates, setProperties, assertedProperties, refutedProperties) {
   if (stepType === PREDICATE_STEP_TYPE_CAPTURE) {
     const name2 = captureNames[stepValueId];
     steps.push({ type: "capture", name: name2 });
@@ -13018,27 +13018,27 @@ function parsePattern(index, stepType, stepValueId, captureNames, stringValues, 
       case "not-eq?":
       case "any-eq?":
       case "eq?":
-        parseAnyPredicate(steps, index, operator, textPredicates);
+        parseAnyPredicate(steps, index2, operator, textPredicates);
         break;
       case "any-not-match?":
       case "not-match?":
       case "any-match?":
       case "match?":
-        parseMatchPredicate(steps, index, operator, textPredicates);
+        parseMatchPredicate(steps, index2, operator, textPredicates);
         break;
       case "not-any-of?":
       case "any-of?":
-        parseAnyOfPredicate(steps, index, operator, textPredicates);
+        parseAnyOfPredicate(steps, index2, operator, textPredicates);
         break;
       case "is?":
       case "is-not?":
-        parseIsPredicate(steps, index, operator, assertedProperties, refutedProperties);
+        parseIsPredicate(steps, index2, operator, assertedProperties, refutedProperties);
         break;
       case "set!":
-        parseSetDirective(steps, index, setProperties);
+        parseSetDirective(steps, index2, setProperties);
         break;
       default:
-        predicates[index].push({ operator, operands: steps.slice(1) });
+        predicates[index2].push({ operator, operands: steps.slice(1) });
     }
     steps.length = 0;
   }
@@ -13858,16 +13858,16 @@ function findCycles(nodes, edges) {
     if (from === to) selfLoops.add(from);
     adj.get(from)?.push(to);
   }
-  const index = /* @__PURE__ */ new Map();
+  const index2 = /* @__PURE__ */ new Map();
   const low = /* @__PURE__ */ new Map();
   const onStack = /* @__PURE__ */ new Set();
   const stack = [];
   const cycles = [];
   let next = 0;
   for (const root of nodes) {
-    if (index.has(root)) continue;
+    if (index2.has(root)) continue;
     const frames = [{ node: root, i: 0 }];
-    index.set(root, next);
+    index2.set(root, next);
     low.set(root, next++);
     stack.push(root);
     onStack.add(root);
@@ -13877,14 +13877,14 @@ function findCycles(nodes, edges) {
       if (frame.i < neighbors.length) {
         const w = neighbors[frame.i++];
         if (!adj.has(w)) continue;
-        if (!index.has(w)) {
-          index.set(w, next);
+        if (!index2.has(w)) {
+          index2.set(w, next);
           low.set(w, next++);
           stack.push(w);
           onStack.add(w);
           frames.push({ node: w, i: 0 });
         } else if (onStack.has(w)) {
-          low.set(frame.node, Math.min(low.get(frame.node), index.get(w)));
+          low.set(frame.node, Math.min(low.get(frame.node), index2.get(w)));
         }
         continue;
       }
@@ -13892,7 +13892,7 @@ function findCycles(nodes, edges) {
       const v = frame.node;
       const parent = frames[frames.length - 1];
       if (parent) low.set(parent.node, Math.min(low.get(parent.node), low.get(v)));
-      if (low.get(v) !== index.get(v)) continue;
+      if (low.get(v) !== index2.get(v)) continue;
       const component = [];
       for (; ; ) {
         const w = stack.pop();
@@ -13943,8 +13943,8 @@ function buildGraph(args2) {
   const diffs = [];
   for (const f of files) {
     const entry = imports.get(f.path);
-    const index = f.status === "deleted" ? args2.baseIndex : args2.headIndex;
-    clusterInputs.push({ path: f.path, pkg: index.packageOf(f.path) });
+    const index2 = f.status === "deleted" ? args2.baseIndex : args2.headIndex;
+    clusterInputs.push({ path: f.path, pkg: index2.packageOf(f.path) });
     nodes.set(f.path, {
       id: f.path,
       path: f.path,
@@ -14156,9 +14156,9 @@ function parseFile(job, blob) {
   }));
   return { language, parseError: null, imports };
 }
-function safeResolve(parser, imp, from, index) {
+function safeResolve(parser, imp, from, index2) {
   try {
-    return parser.resolve(imp, from, index);
+    return parser.resolve(imp, from, index2);
   } catch (e) {
     return { kind: "unresolved", reason: `resolver error: ${e.message}` };
   }
@@ -14189,9 +14189,9 @@ function resolveGoImport(imp, _from, repo) {
 }
 
 // src/parsers/regex-fallback.ts
-function lineAt(source, index) {
+function lineAt(source, index2) {
   let line = 1;
-  for (let i2 = source.indexOf("\n"); i2 !== -1 && i2 < index; i2 = source.indexOf("\n", i2 + 1)) {
+  for (let i2 = source.indexOf("\n"); i2 !== -1 && i2 < index2; i2 = source.indexOf("\n", i2 + 1)) {
     line++;
   }
   return line;
@@ -14215,8 +14215,8 @@ function typescriptImports(source) {
   for (const { re, kind } of TS_PATTERNS) {
     for (const m of source.matchAll(re)) {
       const specifier = m[m.length - 1];
-      const index = m.index + m[0].search(/\S/);
-      found2.push({ index, imp: { specifier, kind: kind(m), line: lineAt(source, index) } });
+      const index2 = m.index + m[0].search(/\S/);
+      found2.push({ index: index2, imp: { specifier, kind: kind(m), line: lineAt(source, index2) } });
     }
   }
   return found2.sort((a, b) => a.index - b.index).map((f) => f.imp);
@@ -14464,8 +14464,8 @@ function resolvePath(repo, path, depth = 0) {
     for (const e of PROBE) if (repo.has(path + e)) return path + e;
   }
   for (const e of PROBE) {
-    const index = join2(path, `index${e}`);
-    if (repo.has(index)) return index;
+    const index2 = join2(path, `index${e}`);
+    if (repo.has(index2)) return index2;
   }
   const manifest = depth < 2 ? repo.packageManifest(path) : null;
   for (const entry of [manifest?.types, manifest?.main]) {
@@ -14488,8 +14488,8 @@ function resolveBuilt(repo, pkgDir, target) {
 }
 function srcIndex(repo, pkgDir) {
   for (const e of PROBE) {
-    const index = join2(pkgDir, `src/index${e}`);
-    if (repo.has(index)) return index;
+    const index2 = join2(pkgDir, `src/index${e}`);
+    if (repo.has(index2)) return index2;
   }
   return null;
 }
@@ -18089,11 +18089,11 @@ function capSize(inst, size) {
 var arraySize = (input2) => Array.isArray(input2) ? input2.length : -1;
 var mapSize = (input2) => input2 instanceof Map ? input2.size : -1;
 var setSize = (input2) => input2 instanceof Set ? input2.size : -1;
-function handleArrayResult(result, final, index) {
+function handleArrayResult(result, final, index2) {
   if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+    final.issues.push(...prefixIssues(index2, result.issues));
   }
-  final.value[index] = result.value;
+  final.value[index2] = result.value;
 }
 var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
   $ZodType.init(inst, def);
@@ -18705,14 +18705,14 @@ function mergeValues(a, b) {
       return { valid: false, mergeErrorPath: [] };
     }
     const newArray = [];
-    for (let index = 0; index < a.length; index++) {
-      const itemA = a[index];
-      const itemB = b[index];
+    for (let index2 = 0; index2 < a.length; index2++) {
+      const itemA = a[index2];
+      const itemB = b[index2];
       const sharedValue = mergeValues(itemA, itemB);
       if (!sharedValue.valid) {
         return {
           valid: false,
-          mergeErrorPath: [index, ...sharedValue.mergeErrorPath]
+          mergeErrorPath: [index2, ...sharedValue.mergeErrorPath]
         };
       }
       newArray.push(sharedValue.data);
@@ -18863,11 +18863,11 @@ function getTupleOptStart(items, key) {
   }
   return 0;
 }
-function handleTupleResult(result, final, index) {
+function handleTupleResult(result, final, index2) {
   if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+    final.issues.push(...prefixIssues(index2, result.issues));
   }
-  final.value[index] = result.value;
+  final.value[index2] = result.value;
 }
 function handleTupleResults(itemResults, final, items, input2, optoutStart) {
   for (let i2 = 0; i2 < items.length; i2++) {
@@ -33558,7 +33558,7 @@ function detectVersion(schema2, defaultTarget) {
   return defaultTarget ?? "draft-2020-12";
 }
 function applyMinItems(items, minItems) {
-  return items.map((item, index) => index < minItems ? item : item.optional());
+  return items.map((item, index2) => index2 < minItems ? item : item.optional());
 }
 function decodeJSONPointerSegment(segment) {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
@@ -34422,11 +34422,145 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// src/publish/graphs.ts
+var MAX_BOXES = 12;
+var MAX_ARROWS = 30;
+var FOCUS_TOP = 10;
+var MAX_NODES = 25;
+var MAX_EDGES = 60;
+var OWN_FILES = " (own files)";
+var compare4 = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function cutBoxes(graph, changed) {
+  const parent = new Map(graph.clusters.map((c) => [c.id, c.parent]));
+  const children = /* @__PURE__ */ new Map();
+  for (const c of graph.clusters) {
+    if (c.parent) children.set(c.parent, [...children.get(c.parent) ?? [], c.id]);
+  }
+  const own2 = /* @__PURE__ */ new Map();
+  const subtree = /* @__PURE__ */ new Map();
+  for (const n of changed) {
+    own2.set(n.cluster, (own2.get(n.cluster) ?? 0) + 1);
+    for (let c = n.cluster; c; c = parent.get(c)) {
+      subtree.set(c, (subtree.get(c) ?? 0) + 1);
+    }
+  }
+  const whole = (id) => ({ cluster: id, own: false, files: subtree.get(id) ?? 0 });
+  const busy = (ids) => ids.filter((id) => (subtree.get(id) ?? 0) > 0);
+  const kids = (id) => busy(children.get(id) ?? []);
+  let boxes = busy(graph.clusters.filter((c) => c.parent === null).map((c) => c.id)).map(whole);
+  for (; ; ) {
+    const next = boxes.filter((b) => !b.own && kids(b.cluster).length > 0).sort((a, b) => b.files - a.files || compare4(a.cluster, b.cluster))[0];
+    if (!next) break;
+    const ownFiles = own2.get(next.cluster) ?? 0;
+    const parts2 = kids(next.cluster).map(whole);
+    if (ownFiles > 0) parts2.unshift({ cluster: next.cluster, own: true, files: ownFiles });
+    if (boxes.length - 1 + parts2.length > MAX_BOXES) break;
+    boxes = boxes.flatMap((b) => b === next ? parts2 : [b]);
+  }
+  return boxes;
+}
+var dirOf2 = (clusterId) => clusterId.slice(2);
+function overview(graph, changed) {
+  const cut = cutBoxes(graph, changed).sort(
+    (a, b) => compare4(dirOf2(a.cluster), dirOf2(b.cluster)) || Number(b.own) - Number(a.own)
+  );
+  const parent = new Map(graph.clusters.map((c) => [c.id, c.parent]));
+  const whole = /* @__PURE__ */ new Map();
+  const own2 = /* @__PURE__ */ new Map();
+  cut.forEach((b, i2) => (b.own ? own2 : whole).set(b.cluster, i2));
+  const boxOf = (n) => {
+    if (own2.has(n.cluster)) return own2.get(n.cluster);
+    for (let c = n.cluster; c; c = parent.get(c)) {
+      if (whole.has(c)) return whole.get(c);
+    }
+    return void 0;
+  };
+  const box = /* @__PURE__ */ new Map();
+  for (const n of changed) {
+    const i2 = boxOf(n);
+    if (i2 !== void 0) box.set(n.id, i2);
+  }
+  const arrows = /* @__PURE__ */ new Map();
+  for (const e of graph.edges) {
+    if (e.kind !== "changed-changed") continue;
+    const from = box.get(e.from);
+    const to = box.get(e.to);
+    if (from === void 0 || to === void 0 || from === to) continue;
+    const key = `${from}>${to}`;
+    const a = arrows.get(key) ?? { from, to, count: 0, cycle: false };
+    a.count++;
+    a.cycle ||= e.inCycle;
+    arrows.set(key, a);
+  }
+  return {
+    boxes: cut.map((b) => ({
+      label: dirOf2(b.cluster) + (b.own ? OWN_FILES : ""),
+      files: b.files
+    })),
+    arrows: [...arrows.values()].sort((a, b) => b.count - a.count || a.from - b.from || a.to - b.to).slice(0, MAX_ARROWS)
+  };
+}
+function focus(graph, changed) {
+  const byId = new Map(changed.map((n) => [n.id, n]));
+  const index2 = /* @__PURE__ */ new Map();
+  const nodes = [];
+  const add = (id) => {
+    const n = byId.get(id);
+    if (!n || index2.has(id) || nodes.length >= MAX_NODES || n.status === "unchanged") return;
+    index2.set(id, nodes.length);
+    nodes.push({ path: n.path, status: n.status });
+  };
+  graph.ranking.slice(0, FOCUS_TOP).forEach(add);
+  graph.cycles.flat().forEach(add);
+  const edges = [];
+  for (const e of graph.edges) {
+    const from = index2.get(e.from);
+    const to = index2.get(e.to);
+    if (e.kind !== "changed-changed" || from === void 0 || to === void 0) continue;
+    edges.push({ from, to, cycle: e.inCycle });
+  }
+  edges.sort((a, b) => Number(b.cycle) - Number(a.cycle));
+  return { nodes, edges: edges.slice(0, MAX_EDGES) };
+}
+var hasOverview = (g) => g.boxes.length >= 2 && g.arrows.length >= 1;
+var hasFocus = (g) => g.edges.length >= 1;
+function buildCommentGraphs(graph) {
+  const changed = graph.nodes.filter((n) => n.changed);
+  const g = { ...overview(graph, changed), ...focus(graph, changed) };
+  return hasOverview(g) || hasFocus(g) ? g : null;
+}
+
 // src/publish/summary.ts
 var TOP_FILES = 5;
 var MAX_COUNT = 1e7;
 var MAX_PATH = 300;
 var count = external_exports.number().int().min(0).max(MAX_COUNT);
+var index = external_exports.number().int().min(0);
+var graphs = external_exports.object({
+  boxes: external_exports.array(external_exports.object({ label: external_exports.string().max(MAX_PATH), files: count }).strict()).max(MAX_BOXES),
+  arrows: external_exports.array(external_exports.object({ from: index, to: index, count, cycle: external_exports.boolean() }).strict()).max(MAX_ARROWS),
+  nodes: external_exports.array(
+    external_exports.object({
+      path: external_exports.string().max(MAX_PATH),
+      status: external_exports.enum(["added", "modified", "deleted", "renamed"])
+    }).strict()
+  ).max(MAX_NODES),
+  edges: external_exports.array(external_exports.object({ from: index, to: index, cycle: external_exports.boolean() }).strict()).max(MAX_EDGES)
+}).strict().superRefine((g, ctx) => {
+  const check2 = (list, size) => g[list].forEach((x, i2) => {
+    for (const end of ["from", "to"]) {
+      if (x[end] >= size) {
+        ctx.addIssue({
+          code: "custom",
+          path: [list, i2, end],
+          message: `index ${x[end]} is out of range`
+        });
+      }
+    }
+  });
+  check2("arrows", g.boxes.length);
+  check2("edges", g.nodes.length);
+});
 var schema = external_exports.object({
   version: external_exports.literal(1),
   skipped: external_exports.boolean(),
@@ -34439,7 +34573,8 @@ var schema = external_exports.object({
   unresolved: count,
   parseErrors: count,
   top: external_exports.array(external_exports.string().max(MAX_PATH)).max(TOP_FILES),
-  headSha: external_exports.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+  headSha: external_exports.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  graphs: graphs.optional()
 }).strict();
 var clamp = (n) => Math.min(Math.max(Math.trunc(n) || 0, 0), MAX_COUNT);
 function fitPath(path) {
@@ -34447,7 +34582,8 @@ function fitPath(path) {
 }
 function toCommentSummary(result, minFiles, headSha) {
   const s = result.graph?.summary;
-  return {
+  const g = result.graph ? buildCommentGraphs(result.graph) : null;
+  const summary = {
     version: 1,
     skipped: result.skipped,
     minFiles: clamp(minFiles),
@@ -34461,6 +34597,15 @@ function toCommentSummary(result, minFiles, headSha) {
     top: (result.graph?.ranking ?? []).slice(0, TOP_FILES).map(fitPath),
     headSha
   };
+  if (g) {
+    summary.graphs = {
+      boxes: g.boxes.map((b) => ({ label: fitPath(b.label), files: clamp(b.files) })),
+      arrows: g.arrows.map((a) => ({ ...a, count: clamp(a.count) })),
+      nodes: g.nodes.map((n) => ({ path: fitPath(n.path), status: n.status })),
+      edges: g.edges
+    };
+  }
+  return summary;
 }
 async function writeSummaryJson(dir, s) {
   const path = join3(dir, "summary.json");
@@ -34957,31 +35102,31 @@ var CharacterCodes;
 })(CharacterCodes || (CharacterCodes = {}));
 
 // node_modules/jsonc-parser/lib/esm/impl/string-intern.js
-var cachedSpaces = new Array(20).fill(0).map((_, index) => {
-  return " ".repeat(index);
+var cachedSpaces = new Array(20).fill(0).map((_, index2) => {
+  return " ".repeat(index2);
 });
 var maxCachedValues = 200;
 var cachedBreakLinesWithSpaces = {
   " ": {
-    "\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\n" + " ".repeat(index);
+    "\n": new Array(maxCachedValues).fill(0).map((_, index2) => {
+      return "\n" + " ".repeat(index2);
     }),
-    "\r": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\r" + " ".repeat(index);
+    "\r": new Array(maxCachedValues).fill(0).map((_, index2) => {
+      return "\r" + " ".repeat(index2);
     }),
-    "\r\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\r\n" + " ".repeat(index);
+    "\r\n": new Array(maxCachedValues).fill(0).map((_, index2) => {
+      return "\r\n" + " ".repeat(index2);
     })
   },
   "	": {
-    "\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\n" + "	".repeat(index);
+    "\n": new Array(maxCachedValues).fill(0).map((_, index2) => {
+      return "\n" + "	".repeat(index2);
     }),
-    "\r": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\r" + "	".repeat(index);
+    "\r": new Array(maxCachedValues).fill(0).map((_, index2) => {
+      return "\r" + "	".repeat(index2);
     }),
-    "\r\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\r\n" + "	".repeat(index);
+    "\r\n": new Array(maxCachedValues).fill(0).map((_, index2) => {
+      return "\r\n" + "	".repeat(index2);
     })
   }
 };
