@@ -33,7 +33,7 @@ It is a **portable tool**: it lives in its own repo (`github.com/jbheber/pr-diff
 
 ## Constraints
 
-- JavaScript action, TypeScript source, bundled with `@vercel/ncc` into a committed `dist/`. ESLint + Prettier, strict TypeScript.
+- JavaScript action, TypeScript source, bundled with esbuild (ESM) into a committed `dist/`; @vercel/ncc was dropped because it duplicated the tree-sitter WASM per bundle. ESLint + Prettier, strict TypeScript.
 - Runtime: `node24` (**builder's call, departs from the prompt's `node20`**: Node 20 reached end of life in April 2026 and GitHub runners have moved actions to Node 24; `node20` would ship deprecated).
 - Permissions: `contents: read`, `pull-requests: write` (plus `actions: read` for the comment workflow of the fork pattern).
 - Runner: `ubuntu-latest`; the action must also run locally on Windows/macOS through its CLI (for testing).
@@ -110,7 +110,7 @@ Resolution only consults the `RepoIndex` built from `git ls-tree -r <head>` (and
 
 **Edges**: `from` imports `to`. Kinds: `changed→changed` (highlighted), `changed→unchanged`, `unchanged→changed` (only with `scan-repo`). Deleted files are parsed at base, so their edges show what used to depend on what. A deleted file is never a valid target at head; an import of a deleted path from a head file is an `unresolved` import, which is exactly the broken-import signal a reviewer wants, so these are listed separately in the summary.
 
-**Clusters**: by workspace package when the file belongs to one, else by directory, collapsed to depth `cluster-depth` (default 2). Nested clusters are allowed.
+**Clusters**: by workspace package when the file belongs to one (always the outermost cluster), else by directory, starting from the directory cut at depth `cluster-depth` (default 2; inside a package, counted from the package directory). A cluster whose subtree holds more than 30 nodes (all nodes in `graph.json`, unchanged neighbors included) splits: each immediate subdirectory holding nodes becomes a child cluster, files directly in the directory stay in it; applied recursively. A cluster whose only content is one child cluster is merged into that child (packages are never merged away). A node's `cluster` is its innermost cluster; a cluster's `label` is its directory relative to its parent cluster's (the full path at the top level, so a merged chain reads `src/app/modules`).
 
 **Cycles**: Tarjan SCC on the changed→changed subgraph; every SCC of size > 1 (or a self-loop) is a cycle. The summary reports count and members; edges in a cycle are marked.
 
@@ -145,7 +145,7 @@ Patches are **not** in this JSON; they live in a separate `diffs` array (index =
 - **View**: header with totals (files, +/−, edges, cycles, unresolved, parse errors) and the top-10 list (clicking one focuses it). Graph in the middle. Side panel on node click: path (and old path), status, +/− counts, incoming and outgoing edges as clickable lists, the diff rendered on demand and cached.
 - **Encoding**: color = status (added green, modified blue, deleted red, renamed purple; colors chosen to stay distinguishable for common color-blindness, and status also shown by node shape border so color isn't the only channel); size = lines changed, log-scaled and clamped.
 - **Controls**: filename search (highlights + focuses matches), status filter, directory/cluster filter, collapse/expand all and per cluster, "show unchanged neighbors" toggle (off), "show external packages" is not offered (externals are counts only), reset layout, light/dark following the OS.
-- **Scale**: above `collapse-threshold` nodes (default 150) the report opens with clusters collapsed; layout runs once and positions are cached; diffs are never rendered until asked. Target: interactive in < 3 s at 500 nodes on a laptop.
+- **Scale**: above `collapse-threshold` changed files (default 150) the report opens with clusters collapsed, then expands the smallest cluster in view, one at a time, while at most `collapse-threshold` nodes show (so a single huge cluster opens level by level). While clusters are collapsed, all edges between the same two shown endpoints (same direction) are drawn as one edge whose width grows with the count and whose label is the count; it takes the cycle color when any of its edges is in a cycle. Layout runs once and positions are cached; diffs are never rendered until asked. Target: interactive in < 3 s at 500 nodes on a laptop.
 - Works from `file://` with no network.
 
 ### 9. Publishing
@@ -197,7 +197,7 @@ test/
   unit/        parsers, resolvers, cycles, clusters, rank, render escaping
   fixtures/    fixture repos built by a script into temp git repos (base commit + head commit)
   e2e/         runs the CLI pipeline on a fixture, snapshots graph.json
-dist/          ncc output + grammars + report assets (committed)
+dist/          esbuild output + grammars + report assets (committed)
 .github/workflows/  ci.yml (lint, test, check dist is up to date), pr-diff-graph.yml (example, dogfooding)
 README.md
 ```

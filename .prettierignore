@@ -1,0 +1,8 @@
+node_modules
+dist
+build
+coverage
+.superpowers
+package-lock.json
+docs
+src/report/template.html

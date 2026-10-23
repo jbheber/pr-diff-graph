@@ -1,0 +1,78 @@
+name: PR diff graph
+description: Interactive report of a large pull request's changed files and their import graph
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  min-files:
+    description: Skip when the changed files (after include/exclude) are at most this many
+    required: false
+    default: '50'
+  mode:
+    description: >-
+      full (report and comment), report (no comment; for the pull_request half of the fork
+      pattern), or comment (comment from the summary.json artifact of the triggering run; for the
+      workflow_run half)
+    required: false
+    default: full
+  github-token:
+    description: Token for comments and, in comment mode, for downloading the artifact
+    required: false
+    default: ${{ github.token }}
+  comment:
+    description: Post or update the sticky comment on the pull request
+    required: false
+    default: 'true'
+  cluster-depth:
+    description: Starting directory depth for clusters (clusters above 30 files split by subdirectory)
+    required: false
+    default: '2'
+  collapse-threshold:
+    description: Open the graph collapsed above this many changed files
+    required: false
+    default: '150'
+  scan-repo:
+    description: Parse the whole repo to find unchanged files that import changed ones
+    required: false
+    default: 'false'
+  max-patch-bytes:
+    description: Per-file patch cap in the report
+    required: false
+    default: '200000'
+  include:
+    description: Globs (one per line) of changed files to keep; empty keeps all
+    required: false
+    default: ''
+  exclude:
+    description: >-
+      Globs (one per line) of changed files to drop; empty uses the built-in list of lockfiles and
+      generated output such as dist/
+    required: false
+    default: ''
+  artifact-name:
+    description: >-
+      Name of the report artifact; mode report also uploads summary.json alone as
+      <name>-summary, which mode comment downloads
+    required: false
+    default: pr-diff-graph
+  artifact-retention-days:
+    description: Days to keep the artifact (1 to 90)
+    required: false
+    default: '14'
+
+outputs:
+  report-path:
+    description: Path of report.html (empty when skipped)
+  graph-path:
+    description: Path of graph.json (empty when skipped)
+  files-changed:
+    description: Changed files after include/exclude
+  edges-count:
+    description: Import edges in the graph
+  skipped:
+    description: true when the PR is at or under min-files (or the event is not a pull request)
+
+runs:
+  using: node24
+  main: dist/index.js

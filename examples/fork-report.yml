@@ -1,0 +1,27 @@
+# Workflow A of the fork pattern: runs on the pull request with a read-only token for forks,
+# builds the report and uploads it plus a small summary artifact. It never comments.
+# Save as .github/workflows/pr-diff-graph-report.yml. Its `name` must match the `workflows:`
+# list in fork-comment.yml.
+name: pr-diff-graph (report)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-diff-graph-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jbheber/pr-diff-graph@v1
+        with:
+          mode: report

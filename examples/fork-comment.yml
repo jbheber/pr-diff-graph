@@ -1,0 +1,23 @@
+# Workflow B of the fork pattern: runs in the base repo after workflow A (fork-report.yml)
+# completes, with a token that can comment. It never checks out or runs PR code: it only
+# downloads A's small summary artifact and posts the sticky comment.
+# Save as .github/workflows/pr-diff-graph-comment.yml.
+name: pr-diff-graph (comment)
+
+on:
+  workflow_run:
+    workflows: ['pr-diff-graph (report)']
+    types: [completed]
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: jbheber/pr-diff-graph@v1
+        with:
+          mode: comment
