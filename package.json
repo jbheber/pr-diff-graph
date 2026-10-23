@@ -14,7 +14,7 @@
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "grammars": "node scripts/fetch-grammars.mjs",
-    "test:perf": "vitest run --project perf",
+    "test:perf": "npm run build:client && vitest run --project perf",
     "build:client": "node scripts/build.mjs client"
   },
   "devDependencies": {

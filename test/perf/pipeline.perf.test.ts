@@ -73,7 +73,7 @@ it(`runs the pipeline on a ${FILES}-file TS repo in under ${BUDGET_MS} ms`, asyn
     repoSlug: null,
     log: silentLogger,
     grammarDir: grammarDir(),
-    assetsDir: '',
+    assetsDir: join(import.meta.dirname, '../../build/client'),
   });
   const elapsed = performance.now() - started;
   expect(result.graph?.summary.files).toBe(FILES);
