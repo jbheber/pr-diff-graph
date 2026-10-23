@@ -5,11 +5,18 @@ import { findGoModules, type GoModule } from './gomod.js';
 import { baseOf, dirOf } from './paths.js';
 import { findPythonRoots } from './python.js';
 import { loadTsConfigs, type TsConfigInfo } from './tsconfig.js';
-import { findWorkspaces, owningPackage, type WorkspacePackage } from './workspaces.js';
+import {
+  findWorkspaces,
+  manifestFields,
+  owningPackage,
+  parsePackageJsons,
+  type PackageManifest,
+  type WorkspacePackage,
+} from './workspaces.js';
 
 export type { GoModule } from './gomod.js';
 export type { TsConfigInfo } from './tsconfig.js';
-export type { WorkspacePackage } from './workspaces.js';
+export type { PackageManifest, WorkspacePackage } from './workspaces.js';
 
 export interface RepoIndex {
   sha: string;
@@ -24,6 +31,8 @@ export interface RepoIndex {
   nearestTsConfig(fromFile: string): TsConfigInfo | null;
   workspaces: WorkspacePackage[];
   packageOf(path: string): WorkspacePackage | null;
+  /** Entry-point fields of `dir/package.json`, or null when there is none (or it does not parse). */
+  packageManifest(dir: string): PackageManifest | null;
   goModules: GoModule[];
   pythonRoots: string[];
 }
@@ -86,7 +95,8 @@ export async function buildRepoIndex(
     manifests.get(path) ??
     (files.has(path) ? await read(path).then((t) => (t === null ? t : stripBom(t))) : null);
 
-  const workspaces = findWorkspaces(manifests, log);
+  const packageJsons = parsePackageJsons(manifests, log);
+  const workspaces = findWorkspaces(manifests, log, packageJsons);
   const tsconfigs = await loadTsConfigs({ files, readText: readManifest, workspaces, log });
   const tsByDir = new Map(tsconfigs.map((t) => [t.dir, t]));
 
@@ -108,6 +118,10 @@ export async function buildRepoIndex(
     },
     workspaces,
     packageOf: (path) => owningPackage(workspaces, path),
+    packageManifest(dir) {
+      const pkg = packageJsons.get(dir);
+      return pkg ? manifestFields(pkg) : null;
+    },
     goModules: findGoModules(manifests, log),
     pythonRoots: findPythonRoots(files),
   };

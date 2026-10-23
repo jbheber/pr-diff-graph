@@ -3,10 +3,16 @@ import { parse as parseYaml } from 'yaml';
 import type { Logger } from '../log.js';
 import { baseOf, dirOf } from './paths.js';
 
+export interface PackageManifest {
+  main?: string;
+  types?: string;
+  exports?: unknown;
+}
+
 export interface WorkspacePackage {
   name: string;
   dir: string;
-  manifest: { main?: string; types?: string; exports?: unknown };
+  manifest: PackageManifest;
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -15,6 +21,34 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 function stringList(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+/** The entry-point fields of a parsed package.json (`typings` counts as `types`). */
+export function manifestFields(pkg: Record<string, unknown>): PackageManifest {
+  const manifest: PackageManifest = {};
+  if (typeof pkg['main'] === 'string') manifest.main = pkg['main'];
+  if (typeof pkg['types'] === 'string') manifest.types = pkg['types'];
+  else if (typeof pkg['typings'] === 'string') manifest.types = pkg['typings'];
+  if (pkg['exports'] !== undefined) manifest.exports = pkg['exports'];
+  return manifest;
+}
+
+/** Every package.json in `manifests` that parses to an object, by directory. */
+export function parsePackageJsons(
+  manifests: ReadonlyMap<string, string>,
+  log: Logger,
+): Map<string, Record<string, unknown>> {
+  const packages = new Map<string, Record<string, unknown>>();
+  for (const [path, text] of manifests) {
+    if (baseOf(path) !== 'package.json') continue;
+    try {
+      const parsed = asRecord(JSON.parse(text));
+      if (parsed) packages.set(dirOf(path), parsed);
+    } catch {
+      log.warn(`could not parse ${path}; ignoring it`);
+    }
+  }
+  return packages;
 }
 
 /** Workspace globs declared by a package.json (`workspaces: [...]` or `{ packages: [...] }`). */
@@ -35,18 +69,8 @@ function cleanPattern(p: string): string {
 export function findWorkspaces(
   manifests: ReadonlyMap<string, string>,
   log: Logger,
+  packages: ReadonlyMap<string, Record<string, unknown>> = parsePackageJsons(manifests, log),
 ): WorkspacePackage[] {
-  const packages = new Map<string, Record<string, unknown>>();
-  for (const [path, text] of manifests) {
-    if (baseOf(path) !== 'package.json') continue;
-    try {
-      const parsed = asRecord(JSON.parse(text));
-      if (parsed) packages.set(dirOf(path), parsed);
-    } catch {
-      log.warn(`could not parse ${path}; ignoring it`);
-    }
-  }
-
   const found = new Map<string, WorkspacePackage>();
   const addFrom = (rootDir: string, patterns: string[]) => {
     const positive = patterns.filter((p) => !p.startsWith('!')).map(cleanPattern);
@@ -60,12 +84,7 @@ export function findWorkspaces(
       if (rel === null || !isMember(rel)) continue;
       const name = pkg['name'];
       if (typeof name !== 'string' || !name) continue;
-      const manifest: WorkspacePackage['manifest'] = {};
-      if (typeof pkg['main'] === 'string') manifest.main = pkg['main'];
-      if (typeof pkg['types'] === 'string') manifest.types = pkg['types'];
-      else if (typeof pkg['typings'] === 'string') manifest.types = pkg['typings'];
-      if (pkg['exports'] !== undefined) manifest.exports = pkg['exports'];
-      found.set(dir, { name, dir, manifest });
+      found.set(dir, { name, dir, manifest: manifestFields(pkg) });
     }
   };
 

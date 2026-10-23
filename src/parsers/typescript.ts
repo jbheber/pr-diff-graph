@@ -1,6 +1,7 @@
 import { Query, type Language, type Node } from 'web-tree-sitter';
 import type { Logger } from '../log.js';
 import { regexImports } from './regex-fallback.js';
+import { resolveTsImport } from './typescript-resolve.js';
 import { withTree, type GrammarName, type TreeSitterRuntime } from './treesitter.js';
 import { ParseError, type LanguageParser, type RawImport } from './types.js';
 
@@ -95,8 +96,6 @@ export function typescriptParser(rt: TreeSitterRuntime, log: Logger): LanguagePa
       }
       return extract(language, query, source, path);
     },
-    resolve() {
-      return { kind: 'unresolved', reason: 'not implemented' };
-    },
+    resolve: resolveTsImport,
   };
 }

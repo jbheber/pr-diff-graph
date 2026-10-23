@@ -78,9 +78,9 @@ describe('parser registry', () => {
 
   it('resolve is not implemented yet', () => {
     const reg = createRegistry(rt, recordingLogger());
-    const ts = reg.forPath('a.ts')!;
+    const go = reg.forPath('a.go')!;
     const repo = {} as RepoIndex;
-    expect(ts.resolve({ specifier: './b', kind: 'static', line: 1 }, 'a.ts', repo)).toEqual({
+    expect(go.resolve({ specifier: './b', kind: 'static', line: 1 }, 'a.go', repo)).toEqual({
       kind: 'unresolved',
       reason: 'not implemented',
     });
