@@ -75,6 +75,26 @@ describe('buildGraph', () => {
     expect(graph.clusters).toEqual([{ id: 'c:src', label: 'src', parent: null }]);
   });
 
+  it('node.cluster is the innermost cluster, neighbors counted', () => {
+    const many = (dir: string, n: number) =>
+      Array.from({ length: n }, (_, i) => changed(`${dir}/f${i}.ts`));
+    const files = [...many('src/app/a', 20), ...many('src/app/b', 10)];
+    // 30 changed files fit one cluster; the neighbor makes it 31, which splits it.
+    const { graph } = build(files, {
+      'src/app/a/f0.ts': ts({ imp: imp('../c/u'), res: file('src/app/c/u.ts') }),
+    });
+    const clusterOf = new Map(graph.nodes.map((n) => [n.id, n.cluster]));
+    expect(clusterOf.get('src/app/a/f0.ts')).toBe('c:src/app/a');
+    expect(clusterOf.get('src/app/b/f9.ts')).toBe('c:src/app/b');
+    expect(clusterOf.get('src/app/c/u.ts')).toBe('c:src/app/c');
+    expect(graph.clusters).toEqual([
+      { id: 'c:src/app', label: 'src/app', parent: null },
+      { id: 'c:src/app/a', label: 'a', parent: 'c:src/app' },
+      { id: 'c:src/app/b', label: 'b', parent: 'c:src/app' },
+      { id: 'c:src/app/c', label: 'c', parent: 'c:src/app' },
+    ]);
+  });
+
   it('outgoing unchanged neighbors are nodes with changed:false', () => {
     const { graph } = build([changed('src/a.ts')], {
       'src/a.ts': ts({ imp: imp('../lib/u'), res: file('lib/u.ts') }),

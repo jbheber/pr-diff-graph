@@ -177,6 +177,20 @@ export function stylesheet(p: Palette): StylesheetJson {
       style: { width: 3.5, 'line-color': p.cycle, 'target-arrow-color': p.cycle, opacity: 1 },
     },
     {
+      // Several file edges between two collapsed clusters, drawn as one (see graph.ts).
+      selector: 'edge.aggregate',
+      style: {
+        width: 'data(width)',
+        label: 'data(label)',
+        'font-size': 11,
+        color: p.fg,
+        'text-outline-color': p.bg,
+        'text-outline-width': 2,
+        'min-zoomed-font-size': 5,
+      },
+    },
+    { selector: 'edge.grouped', style: { display: 'none' } },
+    {
       selector: '.match',
       style: { 'underlay-color': p.match, 'underlay-opacity': 0.55, 'underlay-padding': 7 },
     },

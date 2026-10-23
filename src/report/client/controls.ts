@@ -82,8 +82,12 @@ export function wireControls(graph: GraphJson, view: GraphView): void {
     for (let id: string | null | undefined = c.id; id; id = parent.get(id)) chain.push(id);
     chainOf.set(c.id, chain);
   }
-  for (const c of [...graph.clusters].sort((a, b) => a.label.localeCompare(b.label))) {
-    const option = el('option', {}, c.label);
+  // Nested cluster labels are relative to their parent; the filter lists full paths.
+  const fullPath = (id: string) => id.slice(2);
+  for (const c of [...graph.clusters].sort((a, b) =>
+    fullPath(a.id).localeCompare(fullPath(b.id)),
+  )) {
+    const option = el('option', {}, fullPath(c.id));
     option.value = c.id;
     clusterSelect.append(option);
   }

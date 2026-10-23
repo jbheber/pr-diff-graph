@@ -25,11 +25,11 @@ inputs:
     required: false
     default: 'true'
   cluster-depth:
-    description: Directory depth for clusters
+    description: Starting directory depth for clusters (clusters above 30 files split by subdirectory)
     required: false
     default: '2'
   collapse-threshold:
-    description: Open the graph collapsed above this many nodes
+    description: Open the graph collapsed above this many changed files
     required: false
     default: '150'
   scan-repo:

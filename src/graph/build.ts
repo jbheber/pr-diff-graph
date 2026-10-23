@@ -1,7 +1,7 @@
 import type { ChangedFile } from '../diff/collect.js';
 import type { RawImport } from '../parsers/types.js';
 import type { RepoIndex } from '../repo/index.js';
-import { clusterFor, clusterList } from './clusters.js';
+import { assignClusters, type ClusterInput } from './clusters.js';
 import { findCycles } from './cycles.js';
 import { rankNodes } from './rank.js';
 import type {
@@ -49,17 +49,14 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
   }
 
   const nodes = new Map<string, GraphNode>();
-  const chains: string[][] = [];
+  /** Every node's path and package; clusters are assigned once all nodes are known. */
+  const clusterInputs: ClusterInput[] = [];
   const diffs: DiffEntry[] = [];
-  const clusterOf = (path: string, index: RepoIndex) => {
-    const chain = clusterFor(path, index.packageOf(path), clusterDepth);
-    chains.push(chain);
-    return chain[chain.length - 1]!;
-  };
 
   for (const f of files) {
     const entry = imports.get(f.path);
     const index = f.status === 'deleted' ? args.baseIndex : args.headIndex;
+    clusterInputs.push({ path: f.path, pkg: index.packageOf(f.path) });
     nodes.set(f.path, {
       id: f.path,
       path: f.path,
@@ -67,7 +64,7 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
       status: f.status,
       changed: true,
       language: entry?.language ?? null,
-      cluster: clusterOf(f.path, index),
+      cluster: '', // assigned once every node is known
       additions: f.additions,
       deletions: f.deletions,
       binary: f.binary,
@@ -79,6 +76,7 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
 
   const addUnchanged = (path: string) => {
     if (nodes.has(path)) return;
+    clusterInputs.push({ path, pkg: args.headIndex.packageOf(path) });
     nodes.set(path, {
       id: path,
       path,
@@ -86,7 +84,7 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
       status: 'unchanged',
       changed: false,
       language: imports.get(path)?.language ?? null,
-      cluster: clusterOf(path, args.headIndex),
+      cluster: '',
       additions: 0,
       deletions: 0,
       binary: false,
@@ -169,7 +167,10 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
     }))
     .sort((a, b) => compare(a.from, b.from) || compare(a.to, b.to));
 
-  const nodeList = [...nodes.values()].sort((a, b) => compare(a.id, b.id));
+  const { clusterOf: clusterIds, clusters } = assignClusters(clusterInputs, clusterDepth);
+  const nodeList = [...nodes.values()]
+    .map((n) => ({ ...n, cluster: clusterIds.get(n.id)! }))
+    .sort((a, b) => compare(a.id, b.id));
   unresolved.sort(
     (a, b) => compare(a.from, b.from) || a.line - b.line || compare(a.specifier, b.specifier),
   );
@@ -190,7 +191,7 @@ export function buildGraph(args: BuildGraphArgs): { graph: GraphJson; diffs: Dif
       rawFiles: args.rawFiles,
       externals: externals.size,
     },
-    clusters: clusterList(chains),
+    clusters,
     nodes: nodeList,
     edges: edgeList,
     cycles,

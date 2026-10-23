@@ -10,7 +10,7 @@ exports[`runPipeline on the monorepo fixture > matches the graph snapshot 1`] = 
     },
     {
       "id": "c:packages/core/src",
-      "label": "packages/core/src",
+      "label": "src",
       "parent": "c:packages/core",
     },
     {
@@ -20,12 +20,12 @@ exports[`runPipeline on the monorepo fixture > matches the graph snapshot 1`] = 
     },
     {
       "id": "c:packages/web/public",
-      "label": "packages/web/public",
+      "label": "public",
       "parent": "c:packages/web",
     },
     {
       "id": "c:packages/web/src",
-      "label": "packages/web/src",
+      "label": "src",
       "parent": "c:packages/web",
     },
     {

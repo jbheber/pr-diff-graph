@@ -12891,10 +12891,10 @@ function parseAnyPredicate(steps, index, operator, textPredicates) {
         if (c.name === captureName1) nodes1.push(c.node);
         if (c.name === captureName2) nodes2.push(c.node);
       }
-      const compare3 = /* @__PURE__ */ __name((n1, n2, positive) => {
+      const compare4 = /* @__PURE__ */ __name((n1, n2, positive) => {
         return positive ? n1.text === n2.text : n1.text !== n2.text;
       }, "compare");
-      return matchAll ? nodes1.every((n1) => nodes2.some((n2) => compare3(n1, n2, isPositive))) : nodes1.some((n1) => nodes2.some((n2) => compare3(n1, n2, isPositive)));
+      return matchAll ? nodes1.every((n1) => nodes2.some((n2) => compare4(n1, n2, isPositive))) : nodes1.some((n1) => nodes2.some((n2) => compare4(n1, n2, isPositive)));
     });
   } else {
     const captureName = steps[1].name;
@@ -13767,16 +13767,77 @@ function clusterFor(path, pkg, depth) {
   }
   return dir === "" ? [ROOT] : [`c:${collapse(dir, depth)}`];
 }
-function clusterList(chains) {
-  const clusters = /* @__PURE__ */ new Map();
-  for (const chain of chains) {
+var MAX_CLUSTER_FILES = 30;
+var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function subtreeSize(c) {
+  let n = c.files.length;
+  for (const child of c.children) n += subtreeSize(child);
+  return n;
+}
+function assignClusters(files, depth) {
+  const drafts = /* @__PURE__ */ new Map();
+  const draft = (id, parent, isPackage) => {
+    let d = drafts.get(id);
+    if (!d) {
+      d = {
+        id,
+        dir: id === ROOT ? "" : id.slice(2),
+        parent,
+        isPackage,
+        files: [],
+        children: /* @__PURE__ */ new Set()
+      };
+      drafts.set(id, d);
+      parent?.children.add(d);
+    }
+    return d;
+  };
+  for (const { path, pkg } of [...files].sort((a, b) => compare(a.path, b.path))) {
+    const chain = clusterFor(path, pkg, depth);
+    let parent = null;
     chain.forEach((id, i2) => {
-      if (!clusters.has(id)) {
-        clusters.set(id, { id, label: id.slice(2), parent: i2 > 0 ? chain[i2 - 1] : null });
-      }
+      parent = draft(id, parent, i2 === 0 && pkg !== null && pkg.dir !== "");
     });
+    parent.files.push(path);
   }
-  return [...clusters.values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const split = (c) => {
+    if (subtreeSize(c) > MAX_CLUSTER_FILES) {
+      const own2 = [];
+      for (const path of c.files) {
+        const dir = dirOf(path);
+        if (dir === c.dir) {
+          own2.push(path);
+          continue;
+        }
+        const rest = c.dir === "" ? dir : dir.slice(c.dir.length + 1);
+        const sub = rest.slice(0, rest.indexOf("/") < 0 ? rest.length : rest.indexOf("/"));
+        const childDir = c.dir === "" ? sub : `${c.dir}/${sub}`;
+        draft(`c:${childDir}`, c, false).files.push(path);
+      }
+      c.files = own2;
+    }
+    for (const child of c.children) split(child);
+  };
+  const roots = [...drafts.values()].filter((d) => d.parent === null);
+  for (const root of roots) split(root);
+  for (const c of [...drafts.values()].sort((a, b) => compare(a.id, b.id))) {
+    if (c.isPackage || c.files.length > 0 || c.children.size !== 1) continue;
+    const [child] = c.children;
+    child.parent = c.parent;
+    if (c.parent) {
+      c.parent.children.delete(c);
+      c.parent.children.add(child);
+    }
+    drafts.delete(c.id);
+  }
+  const clusterOf = /* @__PURE__ */ new Map();
+  const clusters = [];
+  for (const c of [...drafts.values()].sort((a, b) => compare(a.id, b.id))) {
+    for (const path of c.files) clusterOf.set(path, c.id);
+    const label = !c.parent ? c.dir || "." : c.parent.dir === "" ? c.dir : c.dir.slice(c.parent.dir.length + 1);
+    clusters.push({ id: c.id, label, parent: c.parent?.id ?? null });
+  }
+  return { clusterOf, clusters };
 }
 
 // src/graph/cycles.ts
@@ -13830,12 +13891,12 @@ function findCycles(nodes, edges) {
         component.push(w);
         if (w === v) break;
       }
-      if (component.length > 1 || selfLoops.has(v)) cycles.push(component.sort(compare));
+      if (component.length > 1 || selfLoops.has(v)) cycles.push(component.sort(compare2));
     }
   }
-  return cycles.sort((a, b) => compare(a[0], b[0]));
+  return cycles.sort((a, b) => compare2(a[0], b[0]));
 }
-function compare(a, b) {
+function compare2(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
@@ -13854,10 +13915,10 @@ function rankNodes(nodes, edges, n = 10) {
 }
 
 // src/graph/build.ts
-var compare2 = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+var compare3 = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function buildGraph(args2) {
   const { imports, clusterDepth } = args2;
-  const files = [...args2.files].sort((a, b) => compare2(a.path, b.path));
+  const files = [...args2.files].sort((a, b) => compare3(a.path, b.path));
   const changedIds = new Set(files.map((f) => f.path));
   const renamedTo = /* @__PURE__ */ new Map();
   const gone = /* @__PURE__ */ new Set();
@@ -13869,16 +13930,12 @@ function buildGraph(args2) {
     }
   }
   const nodes = /* @__PURE__ */ new Map();
-  const chains = [];
+  const clusterInputs = [];
   const diffs = [];
-  const clusterOf = (path, index) => {
-    const chain = clusterFor(path, index.packageOf(path), clusterDepth);
-    chains.push(chain);
-    return chain[chain.length - 1];
-  };
   for (const f of files) {
     const entry = imports.get(f.path);
     const index = f.status === "deleted" ? args2.baseIndex : args2.headIndex;
+    clusterInputs.push({ path: f.path, pkg: index.packageOf(f.path) });
     nodes.set(f.path, {
       id: f.path,
       path: f.path,
@@ -13886,7 +13943,8 @@ function buildGraph(args2) {
       status: f.status,
       changed: true,
       language: entry?.language ?? null,
-      cluster: clusterOf(f.path, index),
+      cluster: "",
+      // assigned once every node is known
       additions: f.additions,
       deletions: f.deletions,
       binary: f.binary,
@@ -13897,6 +13955,7 @@ function buildGraph(args2) {
   }
   const addUnchanged = (path) => {
     if (nodes.has(path)) return;
+    clusterInputs.push({ path, pkg: args2.headIndex.packageOf(path) });
     nodes.set(path, {
       id: path,
       path,
@@ -13904,7 +13963,7 @@ function buildGraph(args2) {
       status: "unchanged",
       changed: false,
       language: imports.get(path)?.language ?? null,
-      cluster: clusterOf(path, args2.headIndex),
+      cluster: "",
       additions: 0,
       deletions: 0,
       binary: false,
@@ -13961,19 +14020,20 @@ function buildGraph(args2) {
     }
   }
   const changedEdges = [...edges.values()].filter((e) => e.kind === "changed-changed").map((e) => [e.from, e.to]);
-  const cycles = findCycles([...changedIds].sort(compare2), changedEdges);
+  const cycles = findCycles([...changedIds].sort(compare3), changedEdges);
   const cycleOf = /* @__PURE__ */ new Map();
   cycles.forEach((members2, i2) => members2.forEach((m) => cycleOf.set(m, i2)));
   const edgeList = [...edges.values()].map((e) => ({
     from: e.from,
     to: e.to,
     kind: e.kind,
-    importKinds: [...e.kinds].sort(compare2),
+    importKinds: [...e.kinds].sort(compare3),
     inCycle: e.kind === "changed-changed" && cycleOf.has(e.from) && cycleOf.get(e.from) === cycleOf.get(e.to)
-  })).sort((a, b) => compare2(a.from, b.from) || compare2(a.to, b.to));
-  const nodeList = [...nodes.values()].sort((a, b) => compare2(a.id, b.id));
+  })).sort((a, b) => compare3(a.from, b.from) || compare3(a.to, b.to));
+  const { clusterOf: clusterIds, clusters } = assignClusters(clusterInputs, clusterDepth);
+  const nodeList = [...nodes.values()].map((n) => ({ ...n, cluster: clusterIds.get(n.id) })).sort((a, b) => compare3(a.id, b.id));
   unresolved.sort(
-    (a, b) => compare2(a.from, b.from) || a.line - b.line || compare2(a.specifier, b.specifier)
+    (a, b) => compare3(a.from, b.from) || a.line - b.line || compare3(a.specifier, b.specifier)
   );
   const changedNodes = nodeList.filter((n) => n.changed);
   const graph = {
@@ -13991,7 +14051,7 @@ function buildGraph(args2) {
       rawFiles: args2.rawFiles,
       externals: externals.size
     },
-    clusters: clusterList(chains),
+    clusters,
     nodes: nodeList,
     edges: edgeList,
     cycles,

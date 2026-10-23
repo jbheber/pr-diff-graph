@@ -25,11 +25,9 @@ export function start(deps: { renderDiff?: RenderDiff } = {}): ReportApi {
   const graph = readJson<GraphJson>('graph-data');
   const diffs = readJson<DiffEntry[]>('diff-data');
   const options = readJson<ReportOptions>('options-data');
-  const changed = graph.nodes.filter((n) => n.changed).length;
-
   const view = createGraphView(byId('graph'), graph, {
     headless: Boolean(window.__PDG_TEST__),
-    collapsed: changed > options.collapseThreshold,
+    collapseThreshold: options.collapseThreshold,
   });
   const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
   const openNode = (path: string): boolean => {

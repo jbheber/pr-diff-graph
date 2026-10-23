@@ -1,5 +1,6 @@
 import cytoscape, {
   type Core,
+  type EdgeSingular,
   type ElementDefinition,
   type LayoutOptions,
   type NodeSingular,
@@ -24,6 +25,52 @@ interface ExpandCollapse {
   expand(node: NodeSingular): void;
   isExpandable(node: NodeSingular): boolean;
   isCollapsible(node: NodeSingular): boolean;
+}
+
+/** Width of an edge standing for `count` file edges. */
+export const aggregateWidth = (count: number): number => Math.min(8, 1 + 1.5 * Math.log2(count));
+
+/**
+ * The clusters to expand when a big graph opens collapsed, in order (parents first).
+ *
+ * Rule: start with every cluster collapsed; then, while it keeps at most `threshold` nodes on
+ * screen, expand the smallest collapsed cluster in view (fewest changed files, then by id).
+ * Expanding a cluster shows its own changed files and its child clusters (still collapsed), so
+ * a single huge top cluster opens level by level instead of staying one blob. Stops when no
+ * cluster in view fits. Only changed files count: unchanged neighbors start hidden.
+ */
+export function clustersToExpand(graph: GraphJson, threshold: number): string[] {
+  const parent = new Map(graph.clusters.map((c) => [c.id, c.parent]));
+  const own = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const n of graph.nodes) {
+    if (!n.changed) continue;
+    own.set(n.cluster, (own.get(n.cluster) ?? 0) + 1);
+    for (let id: string | null | undefined = n.cluster; id; id = parent.get(id)) {
+      total.set(id, (total.get(id) ?? 0) + 1);
+    }
+  }
+  /** Child clusters holding changed files, by parent (null: the top level). */
+  const children = new Map<string | null, string[]>();
+  for (const c of graph.clusters) {
+    if (!total.get(c.id)) continue;
+    children.set(c.parent, [...(children.get(c.parent) ?? []), c.id]);
+  }
+  const cost = (id: string) => (own.get(id) ?? 0) + (children.get(id)?.length ?? 0) - 1;
+  const bySize = (a: string, b: string) => total.get(a)! - total.get(b)! || (a < b ? -1 : 1);
+
+  const inView = [...(children.get(null) ?? [])];
+  let shown = inView.length;
+  const order: string[] = [];
+  for (;;) {
+    inView.sort(bySize);
+    const i = inView.findIndex((id) => shown + cost(id) <= threshold);
+    if (i < 0) return order;
+    const id = inView.splice(i, 1)[0]!;
+    shown += cost(id);
+    order.push(id);
+    inView.push(...(children.get(id) ?? []));
+  }
 }
 
 export interface GraphView {
@@ -100,7 +147,7 @@ function clusterChains(graph: GraphJson): Map<string, string[]> {
 export function createGraphView(
   container: HTMLElement,
   graph: GraphJson,
-  opts: { headless: boolean; collapsed: boolean },
+  opts: { headless: boolean; collapseThreshold: number },
 ): GraphView {
   const chains = clusterChains(graph);
   const cy = cytoscape({
@@ -148,7 +195,79 @@ export function createGraphView(
     cueEnabled: !opts.headless,
     expandCollapseCueSize: 12,
   });
-  if (opts.collapsed) ec.collapseAll();
+
+  /**
+   * While clusters are collapsed, the extension reroutes the edges of their files to them
+   * ("meta edges"), so parallel edges pile up between two clusters. Each set of edges between
+   * the same two shown endpoints (same direction) is drawn as one `aggregate` edge labelled with
+   * the count; the originals stay in the graph, hidden (`grouped`), and come back on expand.
+   * Meta edges of files hidden by the filters are hidden too, so they don't count.
+   */
+  const clearAggregates = () => {
+    cy.remove(cy.edges('.aggregate'));
+    cy.edges('.grouped').removeClass('grouped');
+  };
+  const buildAggregates = () => {
+    const groups = new Map<string, EdgeSingular[]>();
+    cy.edges('.cy-expand-collapse-meta-edge').forEach((e) => {
+      const ends = e.data('originalEnds') as { source: NodeSingular; target: NodeSingular };
+      if (ends.source.hasClass('hidden') || ends.target.hasClass('hidden')) {
+        e.addClass('grouped');
+        return;
+      }
+      const key = `${e.source().id()}\0${e.target().id()}`;
+      groups.set(key, [...(groups.get(key) ?? []), e]);
+    });
+    const added: ElementDefinition[] = [];
+    for (const members of groups.values()) {
+      if (members.length < 2) continue;
+      for (const e of members) e.addClass('grouped');
+      const kind = members.some((e) => e.hasClass('changed-changed'))
+        ? 'changed-changed'
+        : members.some((e) => e.hasClass('unchanged-changed'))
+          ? 'unchanged-changed'
+          : 'changed-unchanged';
+      const cycle = members.some((e) => e.hasClass('cycle')) ? ' cycle' : '';
+      added.push({
+        group: 'edges',
+        data: {
+          id: `agg${added.length}`,
+          source: members[0]!.source().id(),
+          target: members[0]!.target().id(),
+          label: `${members.length}`,
+          width: aggregateWidth(members.length),
+        },
+        classes: `aggregate ${kind}${cycle}`,
+      });
+    }
+    cy.add(added);
+  };
+  let batching = false;
+  /** Runs expand/collapse steps, rebuilding the aggregate edges once around them. */
+  const step = (fn: () => void) => {
+    batching = true;
+    clearAggregates();
+    try {
+      fn();
+    } finally {
+      batching = false;
+      buildAggregates();
+    }
+  };
+  // The extension's own cue (the +/− on a cluster) expands and collapses outside `step`.
+  cy.on('expandcollapse.beforecollapse expandcollapse.beforeexpand', () => {
+    if (!batching) clearAggregates();
+  });
+  cy.on('expandcollapse.aftercollapse expandcollapse.afterexpand', () => {
+    if (!batching) buildAggregates();
+  });
+
+  if (graph.nodes.filter((n) => n.changed).length > opts.collapseThreshold) {
+    step(() => {
+      ec.collapseAll();
+      for (const id of clustersToExpand(graph, opts.collapseThreshold)) ec.expand(byId.get(id)!);
+    });
+  }
   fitVisible();
   if (!opts.headless) {
     // The container may get its final size only after first layout of the page.
@@ -160,8 +279,10 @@ export function createGraphView(
 
   cy.on('dbltap', 'node.cluster', (e) => {
     const n = e.target as NodeSingular;
-    if (ec.isExpandable(n)) ec.expand(n);
-    else if (ec.isCollapsible(n)) ec.collapse(n);
+    step(() => {
+      if (ec.isExpandable(n)) ec.expand(n);
+      else if (ec.isCollapsible(n)) ec.collapse(n);
+    });
   });
 
   const media =
@@ -186,20 +307,22 @@ export function createGraphView(
   return {
     cy,
     collapseAll() {
-      ec.collapseAll();
+      step(() => ec.collapseAll());
       fitVisible();
     },
     expandAll() {
-      ec.expandAll();
+      step(() => ec.expandAll());
       fitVisible();
     },
 
     reveal(path) {
       const node = nodeByPath.get(path);
       if (!node) return;
-      for (let holder = collapsedHolder(node); holder; holder = collapsedHolder(node)) {
-        ec.expand(holder);
-      }
+      step(() => {
+        for (let holder = collapsedHolder(node); holder; holder = collapsedHolder(node)) {
+          ec.expand(holder);
+        }
+      });
       const el = byId.get(fileId(path));
       if (!el?.inside()) return;
       cy.elements(':selected').unselect();
@@ -216,6 +339,8 @@ export function createGraphView(
         if (on) for (const id of chains.get(n.cluster) ?? []) shown.add(id);
       });
       for (const el of clusterEls) el.toggleClass('hidden', !shown.has(el.id()));
+      // Hidden files leave the aggregate counts.
+      step(() => undefined);
       fitVisible();
     },
 

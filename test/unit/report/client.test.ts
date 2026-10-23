@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import cytoscape, { type Core, type NodeSingular } from 'cytoscape';
+import cytoscape, { type Core, type EdgeCollection, type NodeSingular } from 'cytoscape';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { DiffEntry, GraphJson, GraphNode } from '../../../src/graph/types.js';
@@ -158,6 +158,10 @@ describe('report client', () => {
     load(fixtureHtml);
     const { cy } = startReport();
     const select = $<HTMLSelectElement>('#cluster-filter');
+    // Nested clusters are labelled relative to their parent; the filter names the full path.
+    const options = [...select.options].map((o) => o.textContent);
+    expect(options).toContain('packages/web/src');
+    expect(options).not.toContain('src');
     select.value = 'c:services/py';
     select.dispatchEvent(new Event('change'));
     for (const n of graph.nodes.filter((n) => n.changed)) {
@@ -354,6 +358,139 @@ describe('report client', () => {
   });
 });
 
+describe('collapsed clusters', () => {
+  const twoClusters = (opts: { cycle?: boolean; neighbor?: boolean } = {}) => {
+    const g = clusteredGraph({ 'c:a': 5, 'c:b': 5 });
+    const edges = [0, 1, 2, 3, 4].map((i) => edge(`a/f${i}.ts`, `b/f${i}.ts`));
+    if (opts.cycle) edges[2] = { ...edges[2]!, inCycle: true };
+    if (opts.neighbor) {
+      g.nodes.push({
+        ...g.nodes[0]!,
+        id: 'b/u.ts',
+        path: 'b/u.ts',
+        cluster: 'c:b',
+        changed: false,
+        status: 'unchanged',
+        diffRef: null,
+      });
+      edges.push({ ...edge('a/f0.ts', 'b/u.ts'), kind: 'changed-unchanged' });
+    }
+    return { ...g, edges };
+  };
+  const shownEdges = (cy: Core) => cy.edges().filter((e) => e.visible()) as EdgeCollection;
+
+  it('joins the edges between two collapsed clusters into one, labelled with the count', () => {
+    loadGraph(twoClusters(), [], {}, { collapseThreshold: 1 });
+    const { cy } = startReport();
+    const [agg, ...rest] = shownEdges(cy);
+    expect(rest).toHaveLength(0);
+    expect(agg!.hasClass('aggregate')).toBe(true);
+    expect(agg!.source().id()).toBe('c:a');
+    expect(agg!.target().id()).toBe('c:b');
+    expect(agg!.style('label')).toBe('5');
+    expect(agg!.hasClass('cycle')).toBe(false);
+    expect(parseFloat(agg!.style('width'))).toBeCloseTo(1 + 1.5 * Math.log2(5));
+
+    $<HTMLButtonElement>('#expand-all').click();
+    expect(cy.edges('.aggregate')).toHaveLength(0);
+    expect(shownEdges(cy)).toHaveLength(5);
+    expect(shownEdges(cy).sources().filter('.file')).toHaveLength(5);
+
+    $<HTMLButtonElement>('#collapse-all').click();
+    expect(shownEdges(cy)).toHaveLength(1);
+    expect(shownEdges(cy)[0]!.style('label')).toBe('5');
+  });
+
+  it('draws an aggregated edge holding a cycle edge in the cycle color', () => {
+    loadGraph(twoClusters({ cycle: true }), [], {}, { collapseThreshold: 1 });
+    const { cy } = startReport();
+    const agg = shownEdges(cy)[0]!;
+    expect(agg.hasClass('cycle')).toBe(true);
+    expect(agg.style('line-color')).toBe(
+      cy.edges('.cycle').not('.aggregate')[0]!.style('line-color'),
+    );
+  });
+
+  it('leaves hidden files out of the count, and tapping it opens nothing', () => {
+    loadGraph(twoClusters({ neighbor: true }), [], {}, { collapseThreshold: 1 });
+    const { cy } = startReport();
+    expect(shownEdges(cy).map((e) => e.style('label'))).toEqual(['5']);
+    setChecked($<HTMLInputElement>('#neighbors'), true);
+    expect(shownEdges(cy).map((e) => e.style('label'))).toEqual(['6']);
+
+    expect(() => shownEdges(cy)[0]!.emit('tap')).not.toThrow();
+    expect($('#panel').hidden).toBe(true);
+  });
+
+  it('opens big graphs with the smallest clusters expanded while at most collapseThreshold show', () => {
+    loadGraph(
+      clusteredGraph({ 'c:w': 10, 'c:x': 20, 'c:y': 60, 'c:z': 100 }),
+      [],
+      {},
+      { collapseThreshold: 150 },
+    );
+    const { cy } = startReport();
+    const collapsed = (id: string) =>
+      cy.getElementById(id).hasClass('cy-expand-collapse-collapsed-node');
+    expect(['c:w', 'c:x', 'c:y', 'c:z'].map(collapsed)).toEqual([false, false, false, true]);
+    expect(cy.nodes('.file')).toHaveLength(90);
+  });
+
+  it('opens nested clusters level by level', () => {
+    const children = Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((k) => [`c:app/${k}`, 40]));
+    loadGraph(clusteredGraph({ 'c:app': 0, ...children }), [], {}, { collapseThreshold: 150 });
+    const { cy } = startReport();
+    const collapsed = (id: string) =>
+      cy.getElementById(id).hasClass('cy-expand-collapse-collapsed-node');
+    expect(collapsed('c:app')).toBe(false);
+    expect(['a', 'b', 'c', 'd', 'e'].map((k) => collapsed(`c:app/${k}`))).toEqual([
+      false,
+      false,
+      false,
+      true,
+      true,
+    ]);
+  });
+});
+
+/**
+ * Changed files `f0.ts`… in each cluster (`c:a/b` is a child of `c:a` when both are listed),
+ * no edges.
+ */
+function clusteredGraph(sizes: Record<string, number>): GraphJson {
+  const ids = Object.keys(sizes);
+  const parentOf = (id: string) =>
+    ids.filter((p) => id.startsWith(`${p}/`)).sort((a, b) => b.length - a.length)[0] ?? null;
+  const nodes = ids.flatMap((id) =>
+    Array.from({ length: sizes[id]! }, (_, i): GraphNode => {
+      const path = `${id.slice(2)}/f${i}.ts`;
+      return {
+        ...graph.nodes[0]!,
+        id: path,
+        path,
+        oldPath: null,
+        status: 'modified',
+        changed: true,
+        cluster: id,
+        diffRef: null,
+      };
+    }),
+  );
+  return {
+    ...graph,
+    clusters: ids.map((id) => ({ id, label: id.slice(2), parent: parentOf(id) })),
+    nodes,
+    edges: [],
+    cycles: [],
+    ranking: [],
+    unresolved: [],
+  };
+}
+
+function edge(from: string, to: string): GraphJson['edges'][number] {
+  return { from, to, kind: 'changed-changed', importKinds: ['static'], inCycle: false };
+}
+
 /** A graph with one changed file at `path` in a root cluster labelled `label`. */
 function singleFile(path: string, label: string): GraphJson {
   return {
@@ -368,21 +505,19 @@ function singleFile(path: string, label: string): GraphJson {
 }
 
 /** Renders `g` and `diffs` into the fixture report's template and loads it. */
-function loadGraph(g: GraphJson, diffs: DiffEntry[], node: Partial<GraphNode> = {}) {
+function loadGraph(
+  g: GraphJson,
+  diffs: DiffEntry[],
+  node: Partial<GraphNode> = {},
+  options = { collapseThreshold: 150 },
+) {
   const withNode = { ...g, nodes: g.nodes.map((n) => ({ ...n, ...node })) };
   const template = fixtureHtml.replace(
-    /<script type="application\/json" id="(graph|diff)-data">[\s\S]*?<\/script>/g,
+    /<script type="application\/json" id="(graph|diff|options)-data">[\s\S]*?<\/script>/g,
     (_m, id: string) =>
-      `<script type="application/json" id="${id}-data">{{${id === 'graph' ? 'GRAPH' : 'DIFFS'}_JSON}}</script>`,
+      `<script type="application/json" id="${id}-data">{{${id === 'diff' ? 'DIFFS' : id.toUpperCase()}_JSON}}</script>`,
   );
-  load(
-    renderReport(
-      withNode,
-      diffs,
-      { collapseThreshold: 150 },
-      { template, clientJs: '', clientCss: '' },
-    ),
-  );
+  load(renderReport(withNode, diffs, options, { template, clientJs: '', clientCss: '' }));
 }
 
 describe('bundled report', () => {
