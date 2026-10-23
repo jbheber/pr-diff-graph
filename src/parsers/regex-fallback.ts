@@ -48,18 +48,29 @@ const asName = (part: string) =>
 function pythonImports(source: string): RawImport[] {
   const out: RawImport[] = [];
   const lines = source.split('\n');
-  lines.forEach((text, i) => {
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i]!;
     const line = i + 1;
     const from = /^\s*from\s+(\.*[\w.]*)\s+import\s+(.+)$/.exec(text);
     if (from) {
-      const names = from[2]!
-        .replace(/#.*$/, '')
+      // A parenthesised list may continue on the following lines.
+      let rest = from[2]!.replace(/#.*$/, '');
+      while (rest.includes('(') && !rest.includes(')') && i + 1 < lines.length) {
+        rest += ' ' + lines[++i]!.replace(/#.*$/, '');
+      }
+      const names = rest
         .replace(/[()\\]/g, '')
         .split(',')
         .map(asName)
         .filter(Boolean);
-      out.push({ specifier: from[1]!, kind: 'static', line, names });
-      return;
+      const wildcard = names.length === 1 && names[0] === '*';
+      out.push({
+        specifier: from[1]!,
+        kind: 'static',
+        line,
+        ...(names.length > 0 && !wildcard ? { names } : {}),
+      });
+      continue;
     }
     const imp = /^\s*import\s+([\w.]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*)/.exec(
       text,
@@ -69,7 +80,7 @@ function pythonImports(source: string): RawImport[] {
         out.push({ specifier: asName(part), kind: 'static', line });
       }
     }
-  });
+  }
   return out;
 }
 

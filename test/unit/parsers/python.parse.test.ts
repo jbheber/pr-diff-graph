@@ -76,11 +76,12 @@ describe('python parser: parse', () => {
       'from . import x',
       'from ..pkg import y',
       'from m import *',
+      'from a import (',
+      '  b,',
+      '  c,',
+      ')',
     ].join('\n');
     const fallback = regexImports('python', src);
-    // The fallback reads `*` as a name; tree-sitter reports a wildcard as no names.
-    const wildcard = fallback.find((i) => i.specifier === 'm')!;
-    delete wildcard.names;
     expect(parse(src)).toEqual(fallback);
   });
 });

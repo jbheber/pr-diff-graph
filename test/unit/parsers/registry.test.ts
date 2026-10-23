@@ -124,6 +124,14 @@ describe('regex fallback', () => {
     ]);
   });
 
+  it('python: a wildcard import has no names; a multi-line list is joined', () => {
+    const src = 'from x import *\nfrom a import (\n  b,\n  c,\n)\n';
+    expect(regexImports('python', src)).toEqual([
+      { specifier: 'x', kind: 'static', line: 1 },
+      { specifier: 'a', kind: 'static', line: 2, names: ['b', 'c'] },
+    ]);
+  });
+
   it('go: single and grouped imports', () => {
     const src = 'package main\n\nimport "fmt"\nimport (\n\t"os"\n\tm "example.com/mod/x"\n)\n';
     expect(regexImports('go', src)).toEqual([
