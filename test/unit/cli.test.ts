@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { main, parseCliArgs } from '../../src/cli.js';
+import { main, openCommand, parseCliArgs } from '../../src/cli.js';
 import { silentLogger } from '../../src/log.js';
 import { makeMonorepo, type MonorepoFixture } from '../e2e/fixture.js';
 
@@ -26,6 +26,15 @@ describe('parseCliArgs', () => {
     );
     expect(() => parseCliArgs(['--base', 'x', '--head', 'y', '--nope'])).toThrow();
     expect(parseCliArgs(['-h'])).toBe('help');
+  });
+});
+
+describe('openCommand', () => {
+  it('passes the path as one argument and never through a shell on Windows', () => {
+    const path = String.raw`C:\out\a&b ^%x%\report.html`;
+    expect(openCommand(path, 'win32')).toEqual(['explorer.exe', [path]]);
+    expect(openCommand('/o/r.html', 'darwin')).toEqual(['open', ['/o/r.html']]);
+    expect(openCommand('/o/r.html', 'linux')).toEqual(['xdg-open', ['/o/r.html']]);
   });
 });
 

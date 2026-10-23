@@ -1,8 +1,10 @@
+#!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { git } from './diff/git.js';
+import { isEntryPoint } from './entry.js';
+import { DEFAULTS, intInput } from './inputs.js';
 import { consoleLogger, type Logger } from './log.js';
 import { grammarDir } from './parsers/treesitter.js';
 import { runPipeline } from './pipeline.js';
@@ -15,7 +17,7 @@ Options:
   --base <ref>        base branch or commit
   --head <ref>        head branch or commit
   --out <dir>         output directory (default: pr-diff-graph)
-  --min-files <n>     skip when changed files <= n (default: 50)
+  --min-files <n>     skip when changed files <= n (default: ${DEFAULTS.minFiles})
   --scan-repo         parse the whole repo to find unchanged importers of changed files
   --open              open the report when done
   -h, --help          show this help`;
@@ -40,7 +42,7 @@ export function parseCliArgs(argv: string[]): CliArgs | 'help' {
       base: { type: 'string' },
       head: { type: 'string' },
       out: { type: 'string', default: 'pr-diff-graph' },
-      'min-files': { type: 'string', default: '50' },
+      'min-files': { type: 'string', default: String(DEFAULTS.minFiles) },
       'scan-repo': { type: 'boolean', default: false },
       open: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -48,10 +50,13 @@ export function parseCliArgs(argv: string[]): CliArgs | 'help' {
   });
   if (values.help) return 'help';
   if (!values.base || !values.head) throw new Error('--base and --head are required');
-  const minFiles = Number(values['min-files']);
-  if (!Number.isInteger(minFiles) || minFiles < 0) {
-    throw new Error(`--min-files must be a non-negative integer, got ${values['min-files']}`);
-  }
+  const minFiles = intInput(
+    '--min-files',
+    values['min-files'],
+    DEFAULTS.minFiles,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
   return {
     repo: values.repo,
     base: values.base,
@@ -74,16 +79,19 @@ async function revParse(repo: string, ref: string): Promise<string> {
 }
 
 /**
- * Opens `path` with the OS default handler, detached; never throws (warns instead). On Windows
- * the empty argument is start's window title, which Node quotes as `""`.
+ * The command that opens `path` with the OS default handler. On Windows it is `explorer.exe`
+ * with the path as one argument, so no shell (`cmd /c start`) sees cmd metacharacters such as
+ * `&` or `^` in it.
  */
+export function openCommand(path: string, platform = process.platform): [string, string[]] {
+  if (platform === 'win32') return ['explorer.exe', [path]];
+  if (platform === 'darwin') return ['open', [path]];
+  return ['xdg-open', [path]];
+}
+
+/** Opens `path` with the OS default handler, detached; never throws (warns instead). */
 export function openFile(path: string, log: Logger): void {
-  const [cmd, args] =
-    process.platform === 'win32'
-      ? ['cmd', ['/c', 'start', '', path]]
-      : process.platform === 'darwin'
-        ? ['open', [path]]
-        : ['xdg-open', [path]];
+  const [cmd, args] = openCommand(path);
   try {
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
     child.on('error', (e) => log.warn(`could not open ${path}: ${e.message}`));
@@ -118,10 +126,10 @@ export async function main(argv: string[], log: Logger = consoleLogger): Promise
       minFiles: args.minFiles,
       include: [],
       exclude: [],
-      clusterDepth: 2,
-      collapseThreshold: 150,
+      clusterDepth: DEFAULTS.clusterDepth,
+      collapseThreshold: DEFAULTS.collapseThreshold,
       scanRepo: args.scanRepo,
-      maxPatchBytes: 200_000,
+      maxPatchBytes: DEFAULTS.maxPatchBytes,
       prNumber: null,
       repoSlug: null,
       log,
@@ -143,6 +151,6 @@ export async function main(argv: string[], log: Logger = consoleLogger): Promise
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isEntryPoint(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2));
 }

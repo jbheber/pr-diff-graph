@@ -1,6 +1,10 @@
-// Builds the report client: `node scripts/build.mjs client [outDir]` (default outDir: build/client).
-// Writes report-client.js (one IIFE with every library bundled in, headed by a THIRD_PARTY_NOTICES
+// `node scripts/build.mjs client [outDir]` builds the report client (default outDir: build/client):
+// report-client.js (one IIFE with every library bundled in, headed by a THIRD_PARTY_NOTICES
 // comment), report-client.css (diff2html's stylesheet inlined) and a copy of template.html.
+//
+// `node scripts/build.mjs dist` builds the committed dist/: the action (dist/index.js) and the CLI
+// (dist/cli/index.js) as ESM bundles, the report client and template, and dist/grammars/. Both
+// bundles find the shared files from their own location (`grammarDir`, `reportAssetsDir`).
 import console from 'node:console';
 import {
   copyFileSync,
@@ -8,6 +12,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -30,7 +35,9 @@ function packagesOf(metafile) {
 
 function licenseText(pkgDir) {
   const file = readdirSync(pkgDir).find((f) => /^(licen[cs]e|copying)(\.(md|txt))?$/i.test(f));
-  return file ? readFileSync(join(pkgDir, file), 'utf8').trim() : null;
+  // Some license files have CRLF line ends; git would normalize them and dist/ would not match.
+  if (!file) return null;
+  return readFileSync(join(pkgDir, file), 'utf8').replace(/\r\n?/g, '\n').trim();
 }
 
 /** One block comment with the name, version, license and license text of every bundled package. */
@@ -89,11 +96,56 @@ async function buildClient(outDir) {
   );
 }
 
+// Bundled CommonJS dependencies call `require` for Node built-ins; ESM output has none of its own.
+const REQUIRE_SHIM =
+  "import { createRequire as __pdgCreateRequire } from 'node:module';\n" +
+  'const require = __pdgCreateRequire(import.meta.url);';
+
+/** One ESM bundle of a Node entry point, headed by the notices of the packages it bundles. */
+async function buildNode(entry, outfile) {
+  const result = await esbuild.build({
+    entryPoints: [join(root, entry)],
+    bundle: true,
+    platform: 'node',
+    // jsonc-parser's `main` is a UMD build whose requires esbuild cannot follow; prefer ESM.
+    mainFields: ['module', 'main'],
+    format: 'esm',
+    target: 'node24',
+    banner: { js: REQUIRE_SHIM },
+    legalComments: 'none',
+    metafile: true,
+    write: false,
+    logLevel: 'warning',
+  });
+  let text = result.outputFiles[0].text;
+  const hashbang = text.startsWith('#!') ? text.slice(0, text.indexOf('\n') + 1) : '';
+  text = hashbang + notices(result.metafile) + text.slice(hashbang.length);
+  mkdirSync(dirname(outfile), { recursive: true });
+  writeFileSync(outfile, text);
+  console.log(`${entry} → ${outfile} (${(text.length / 1024).toFixed(0)} KiB)`);
+}
+
+async function buildDist(outDir) {
+  rmSync(outDir, { recursive: true, force: true });
+  await buildNode('src/main.ts', join(outDir, 'index.js'));
+  await buildNode('src/cli.ts', join(outDir, 'cli', 'index.js'));
+  await buildClient(outDir);
+  const grammars = join(outDir, 'grammars');
+  mkdirSync(grammars, { recursive: true });
+  for (const f of readdirSync(join(root, 'grammars'))) {
+    if (f.endsWith('.wasm') || f === 'VERSIONS') {
+      copyFileSync(join(root, 'grammars', f), join(grammars, f));
+    }
+  }
+}
+
 const [target = 'client', out] = process.argv.slice(2);
-if (target !== 'client') {
-  console.error(`unknown build target: ${target} (expected: client)`);
+if (!existsSync(clientDir)) throw new Error(`missing ${clientDir}`);
+if (target === 'client') {
+  await buildClient(resolve(root, out ?? join('build', 'client')));
+} else if (target === 'dist') {
+  await buildDist(resolve(root, out ?? 'dist'));
+} else {
+  console.error(`unknown build target: ${target} (expected: client or dist)`);
   process.exit(1);
 }
-const outDir = resolve(root, out ?? join('build', 'client'));
-if (!existsSync(clientDir)) throw new Error(`missing ${clientDir}`);
-await buildClient(outDir);

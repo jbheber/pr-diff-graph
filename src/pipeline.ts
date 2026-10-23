@@ -9,6 +9,7 @@ import { collectImports } from './graph/imports.js';
 import type { GraphJson } from './graph/types.js';
 import type { Logger } from './log.js';
 import { createRegistry } from './parsers/registry.js';
+import { toCommentSummary, writeSummaryJson } from './publish/summary.js';
 import { initTreeSitter } from './parsers/treesitter.js';
 import { buildRepoIndex } from './repo/index.js';
 import { loadReportAssets, renderReport } from './report/render.js';
@@ -103,23 +104,27 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     await mkdir(opts.outDir, { recursive: true });
     const reportPath = join(opts.outDir, 'report.html');
     const graphPath = join(opts.outDir, 'graph.json');
-    const summaryPath = join(opts.outDir, 'summary.json');
     await writeFile(reportPath, html);
     await writeFile(graphPath, JSON.stringify(graph, null, 2) + '\n');
-    await writeFile(summaryPath, JSON.stringify(graph.summary, null, 2) + '\n');
     log.info(
       `${graph.summary.files} files, ${graph.summary.edges} edges, ${graph.summary.cycles} cycles`,
     );
 
-    return {
+    const result: PipelineResult = {
       skipped: false,
       filesChanged: files.length,
       rawFilesChanged: raw.length,
       graph,
       reportPath,
       graphPath,
-      summaryPath,
+      summaryPath: null,
     };
+    // summary.json holds what the sticky comment shows; `mode: comment` reads it back.
+    result.summaryPath = await writeSummaryJson(
+      opts.outDir,
+      toCommentSummary(result, opts.minFiles, head),
+    );
+    return result;
   } finally {
     reader.close();
   }

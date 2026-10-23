@@ -19,13 +19,14 @@ export const CLIENT_JS_FILE = 'report-client.js';
 export const CLIENT_CSS_FILE = 'report-client.css';
 
 /**
- * Where the report assets live: next to the bundled action (`dist/`), or `build/client/` (made by
- * `npm run build:client`) when running from source.
+ * Where the report assets live: `dist/`, next to the action bundle or one level above the CLI
+ * bundle (`dist/cli/`), or `build/client/` (made by `npm run build:client`) when running from
+ * source.
  */
 export function reportAssetsDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [here, join(here, '..', '..', 'build', 'client')];
-  return candidates.find((d) => existsSync(join(d, CLIENT_JS_FILE))) ?? candidates[1]!;
+  const candidates = [here, join(here, '..'), join(here, '..', '..', 'build', 'client')];
+  return candidates.find((d) => existsSync(join(d, CLIENT_JS_FILE))) ?? candidates[2]!;
 }
 
 export async function loadReportAssets(dir: string): Promise<ReportAssets> {

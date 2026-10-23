@@ -8,8 +8,11 @@
   "engines": {
     "node": ">=24"
   },
+  "bin": {
+    "pr-diff-graph": "dist/cli/index.js"
+  },
   "scripts": {
-    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.client.json",
+    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.client.json && node scripts/build.mjs dist",
     "test": "npm run build:client && vitest run --project unit",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
@@ -41,9 +44,14 @@
     "vitest": "^5.0.5"
   },
   "dependencies": {
+    "@actions/artifact": "^6.3.1",
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "fflate": "^0.8.3",
     "jsonc-parser": "^3.3.1",
     "picomatch": "^4.0.7",
     "web-tree-sitter": "0.27.1",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   }
 }

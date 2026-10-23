@@ -17,3 +17,19 @@ export const silentLogger: Logger = {
   warn: () => {},
   debug: () => {},
 };
+
+/** The `@actions/core` logging functions `actionsLogger` writes through. */
+export interface CoreLog {
+  info(m: string): void;
+  warning(m: string): void;
+  debug(m: string): void;
+}
+
+/** Logs to the workflow log: warnings become annotations, debug shows with step debugging. */
+export function actionsLogger(core: CoreLog): Logger {
+  return {
+    info: (m) => core.info(m),
+    warn: (m) => core.warning(m),
+    debug: (m) => core.debug(m),
+  };
+}

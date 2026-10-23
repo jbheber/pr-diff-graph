@@ -7,6 +7,7 @@ import type { GraphJson } from '../../src/graph/types.js';
 import { silentLogger } from '../../src/log.js';
 import { grammarDir } from '../../src/parsers/treesitter.js';
 import { runPipeline, type PipelineOptions, type PipelineResult } from '../../src/pipeline.js';
+import { toCommentSummary } from '../../src/publish/summary.js';
 import { makeMonorepo, type MonorepoFixture } from './fixture.js';
 
 let fx: MonorepoFixture;
@@ -103,7 +104,9 @@ describe('runPipeline on the monorepo fixture', () => {
   it('writes graph.json and summary.json', async () => {
     expect(result.graphPath).toBe(join(out, 'full', 'graph.json'));
     expect(JSON.parse(await readFile(result.graphPath!, 'utf8'))).toEqual(graph);
-    expect(JSON.parse(await readFile(result.summaryPath!, 'utf8'))).toEqual(graph.summary);
+    expect(JSON.parse(await readFile(result.summaryPath!, 'utf8'))).toEqual(
+      toCommentSummary(result, 0, graph.pr.head),
+    );
   });
 
   it('writes report.html with no external URLs', async () => {

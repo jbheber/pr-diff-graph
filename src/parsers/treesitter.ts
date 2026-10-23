@@ -16,12 +16,17 @@ export interface TreeSitterRuntime {
 }
 
 /**
- * Directory holding tree-sitter.wasm and the grammar WASMs: `grammars/` next to the bundle
- * (`dist/grammars`) at runtime, `<repo>/grammars` when running from source.
+ * Directory holding tree-sitter.wasm and the grammar WASMs: `dist/grammars` from the action
+ * bundle (`dist/index.js`) and the CLI bundle (`dist/cli/index.js`), `<repo>/grammars` when
+ * running from source.
  */
 export function grammarDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [join(here, 'grammars'), join(here, '..', '..', 'grammars')];
+  const candidates = [
+    join(here, 'grammars'),
+    join(here, '..', 'grammars'),
+    join(here, '..', '..', 'grammars'),
+  ];
   return candidates.find((d) => existsSync(join(d, RUNTIME_WASM))) ?? candidates[0]!;
 }
 
